@@ -2,7 +2,7 @@
 ## Title: Legion Key History
 ## Notes: Personal Mythic+ journal, combat-log import and best-key panel.
 ## Author: Local custom addon
-## Version: 1.4.1
+## Version: 1.4.2
 ## OptionalDeps: ElvUI
 ## SavedVariables: LegionKeyHistoryDB
 Metadata.lua
