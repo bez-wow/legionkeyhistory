@@ -4,19 +4,31 @@ A Mythic+ addon for **Legion (7.3.5) on Tauri** — Evermoon, Tauri and Warriors
 It keeps a journal of every key you complete and shows Raider.IO-style scores and ranks for
 everyone on the Tauri Mythic+ leaderboard, right in the game.
 
-## How to download
+## ⬇️ [Download LegionKeyHistory.zip](https://github.com/bez-wow/legionkeyhistory/releases/latest/download/LegionKeyHistory.zip)
 
-1. Go to **[Releases](https://github.com/bez-wow/legionkeyhistory/releases/latest)** and download
-   **`LegionKeyHistory.zip`** (not the green "Code" button — that one has the wrong folder name).
-2. Extract it into `World of Warcraft\Interface\AddOns\`, so you end up with
-   `Interface\AddOns\LegionKeyHistory\LegionKeyHistory.toc`.
-3. Start WoW, enable the addon and type `/lkh`.
+## Get started in 3 steps
 
-**Keep the leaderboard up to date (recommended):** open the addon folder and double-click
-**`LKH Updater.cmd`**, then choose **Install the hourly leaderboard update service**.
-It refreshes the leaderboard every hour in the background (`/reload` in WoW to load it).
-The same menu can **update the addon to the newest version** or **uninstall the service**.
-No .exe, no Python, no account or API key needed.
+**1. Install.** Extract the zip into `World of Warcraft\Interface\AddOns\`, so you end up with
+`Interface\AddOns\LegionKeyHistory\LegionKeyHistory.toc`. Start WoW and enable the addon.
+(Use the download link above, not GitHub's green "Code" button — that zip has the wrong folder name.)
+
+**2. Turn on hourly leaderboard updates.**
+
+> [!IMPORTANT]
+> The leaderboard inside the zip is a snapshot from the day you downloaded it. To keep scores
+> and ranks current, open the addon folder, double-click **`LKH Updater.cmd`** and choose
+> **1. Install the hourly leaderboard update**. It updates in the background every hour
+> (`/reload` in WoW to load the newest one). No .exe, Python, account or API key needed.
+
+**3. Import your history.** In game, open **Settings → Data → Import from file** (or type
+`/lkh import`). This adds every key your character already has on the leaderboard, so your
+journal and stats aren't empty. New keys are recorded automatically from now on.
+
+New addon versions: run `LKH Updater.cmd` again and choose **Update the addon**. The addon also
+tells you in chat when a new version is out.
+
+**Prefer the web?** The same leaderboard is on
+[Tauri Achievements](https://tauriachievements.github.io/mythic-plus?view=players).
 
 ## What it does
 
