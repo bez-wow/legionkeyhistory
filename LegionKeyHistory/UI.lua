@@ -3,7 +3,9 @@ local PAGE_SIZE=8
 function H:FontPath()
  local media=LibStub and LibStub('LibSharedMedia-3.0',true)
  if media and media.IsValid and media:IsValid('font','Expressway') then return media:Fetch('font','Expressway') end
- return 'Fonts\\FRIZQT__.TTF'
+ -- Without ElvUI's Expressway, use the narrow Arial that ships with every client: the layout is
+ -- sized for a narrow font, and the default Friz Quadrata makes text overflow its columns.
+ return 'Fonts\\ARIALN.TTF'
 end
 function H:ApplyFont(frame)
  if not frame then return end
@@ -259,7 +261,7 @@ function H:CreateUI()
  button(f,'Clear',65,675,-169,function() H.search:SetText('');H.minLevel:SetText('');H.maxLevel:SetText('');H.filterDungeon=nil;H.filterAffix=nil;H.page=1;H:Refresh() end)
  text(f,10,826,-178,'Click a column to sort')
  -- Same columns as the website's run list: key with stars, then tank / healer / DPS.
- local xs={46,206,282,350,452,572,692,880};local widths={156,72,64,98,118,118,186,112};local headers={'DUNGEON','KEY','TIME','AFFIXES','TANK','HEALER','DPS','DATE'}
+ local xs={46,206,282,350,452,572,692,862};local widths={156,72,64,98,118,118,166,130};local headers={'DUNGEON','KEY','TIME','AFFIXES','TANK','HEALER','DPS','DATE'}
  self.sortHeaders={}
  for i,v in ipairs(headers) do
   local key=i==2 and 'level' or i==3 and 'time' or i==8 and 'date' or nil

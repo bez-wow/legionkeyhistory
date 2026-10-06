@@ -404,7 +404,9 @@ local realms={'All realms','Evermoon','Tauri','WoD'}
 local PAGE=12
 local backdrop={bgFile='Interface\\Buttons\\WHITE8X8',edgeFile='Interface\\Buttons\\WHITE8X8',edgeSize=1}
 local function text(p,size,x,y,w,value)
- local t=p:CreateFontString(nil,'OVERLAY','GameFontNormal');t:SetFont(H:FontPath(),size,'');t:SetPoint('TOPLEFT',x,y);t:SetWidth(w);t:SetJustifyH('LEFT');t:SetTextColor(.85,.9,.93);t:SetText(value or '');return t
+ local t=p:CreateFontString(nil,'OVERLAY','GameFontNormal');t:SetFont(H:FontPath(),size,'');t:SetPoint('TOPLEFT',x,y);t:SetWidth(w);t:SetJustifyH('LEFT');t:SetTextColor(.85,.9,.93);t:SetText(value or '')
+ -- One line per cell: a value that does not fit is cut with "..." instead of spilling into the next row.
+ t:SetWordWrap(false);return t
 end
 local function button(p,label,w,x,y,fn)
  local b=CreateFrame('Button',nil,p,'UIPanelButtonTemplate');b:SetSize(w,23);b:SetPoint('TOPLEFT',x,y);b:SetText(label);b:SetScript('OnClick',fn);return b
@@ -452,6 +454,7 @@ function H:LeaderboardEntry(entry,position,specName)
 end
 function H:RefreshLeaderboard()
  local f=self.leaderboardFrame;if not f then return end
+ if f.help and f.title then f.help:ClearAllPoints();f.help:SetPoint('LEFT',f.title,'LEFT',math.ceil(f.title:GetStringWidth() or 300)+12,0) end
  local data=LegionKeyHistoryLeaderboard or {};local rows
  if f.compareOnly and f.compareCount>0 then
   -- Only the picked players, best score first.
@@ -490,7 +493,7 @@ function H:RefreshLeaderboard()
    local c=RAID_CLASS_COLORS and RAID_CLASS_COLORS[classes[p.class]];row.name:SetTextColor(c and c.r or .85,c and c.g or .9,c and c.b or .93)
    for j,d in ipairs(data.dungeons or {}) do
     local best=p.best[d.id]
-    row.keys[j]:SetText(best and self:KeyText(best[2],self:KeyUpgrades(best[3],self:DungeonTimer(j))) or '|cff657080-|r')
+    row.keys[j]:SetText(best and self:KeyText(best[2],self:KeyUpgrades(best[3],self:DungeonTimer(j)),9) or '|cff657080-|r')
     local top=f.compareOnly and best and best[1]==bestOf[d.id]
     row.keyBg[j]:SetShown(top and true or false)
    end
@@ -508,7 +511,7 @@ function H:CreateLeaderboard()
  f:SetBackdrop(backdrop);f:SetBackdropColor(.025,.035,.05,1);f:SetBackdropBorderColor(.17,.30,.34);f:EnableMouse(true)
  f:SetMovable(true);f:RegisterForDrag('LeftButton');f:SetScript('OnDragStart',f.StartMoving);f:SetScript('OnDragStop',f.StopMovingOrSizing)
  table.insert(UISpecialFrames,'LegionKeyHistoryLeaderboardFrame')
- text(f,23,22,-18,650,'|cff4adbc8MYTHIC+|r  Player leaderboard')
+ f.title=text(f,23,22,-18,650,'|cff4adbc8MYTHIC+|r  Player leaderboard')
  button(f,'Your runs',95,875,-20,function() f:Hide();H:OpenJournal() end)
  button(f,'X',24,994,-20,function() f:Hide() end)
  f.status=text(f,11,24,-51,980)
@@ -530,7 +533,7 @@ function H:CreateLeaderboard()
  button(f,'Find me',75,732,-86,function() f.realm=1;f.classID=0;f.specName=nil;f.page=1;f.search:SetText(UnitName('player') or '');H:RefreshLeaderboard() end)
  button(f,'Clear',65,817,-86,function() f.realm=2;f.classID=0;f.specName=nil;f.page=1;f.search:SetText('');H:RefreshLeaderboard() end)
  -- "i" next to the title: how the score works and where the data comes from.
- local help=CreateFrame('Button',nil,f);help:SetSize(22,22);help:SetPoint('TOPLEFT',335,-22)
+ local help=CreateFrame('Button',nil,f);help:SetSize(22,22);help:SetPoint('TOPLEFT',335,-22);f.help=help
  help:SetBackdrop(backdrop);help:SetBackdropColor(.06,.08,.105,1);help:SetBackdropBorderColor(.29,.86,.78)
  help.label=text(help,13,0,-4,22,'i');help.label:SetJustifyH('CENTER');help.label:SetTextColor(.29,.86,.78)
  help:SetScript('OnEnter',function(s)
@@ -632,8 +635,8 @@ function H:KeyUpgrades(seconds,timer)
  return seconds<=timer*.6 and 3 or seconds<=timer*.8 and 2 or 1
 end
 -- Leaderboard keys use the shared style: stars when timed, faded when over time.
-function H:KeyText(level,upgrades)
- return self:KeyStars(level,upgrades,upgrades==0)
+function H:KeyText(level,upgrades,size)
+ return self:KeyStars(level,upgrades,upgrades==0,size)
 end
 -- Timer of the j-th dungeon in the leaderboard file (historyMaps follows the dungeon order).
 function H:DungeonTimer(j)

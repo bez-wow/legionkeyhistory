@@ -186,10 +186,12 @@ end
 
 -- One key style everywhere, like the website: "+18" in normal colour with one gold star per
 -- keystone upgrade when timed; a faded "+18" without stars when over time.
-local STAR='|TInterface\\TargetingFrame\\UI-RaidTargetingIcon_1:11:11:0:0|t'
-function H:KeyStars(level,upgrades,overTime)
+local STAR='|TInterface\\TargetingFrame\\UI-RaidTargetingIcon_1:%d:%d:0:0|t'
+-- size: star size in pixels (11 by default; narrow columns use smaller stars).
+function H:KeyStars(level,upgrades,overTime,size)
  if overTime then return '|cff777777+'..level..'|r' end
- return '+'..level..((upgrades and upgrades>0) and (' '..STAR:rep(upgrades)) or '')
+ local star=STAR:format(size or 11,size or 11)
+ return '+'..level..((upgrades and upgrades>0) and (' '..star:rep(upgrades)) or '')
 end
 -- A recorded run: stars from its upgrades, faded when it was over time.
 function H:RunKeyText(run)
