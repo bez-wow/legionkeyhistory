@@ -325,6 +325,16 @@ local function friendName(row)
 end
 function H:InstallScoreHooks()
  self.scoreHooks=self.scoreHooks or {}
+ -- Player tooltip (mouseover in the world, nameplates, raid frames): keep the game's lines and
+ -- add the LKH score below them.
+ if GameTooltip and GameTooltip.HookScript and not self.scoreHooks.unitTooltip then
+  self.scoreHooks.unitTooltip=true
+  GameTooltip:HookScript('OnTooltipSetUnit',function(tooltip)
+   if not H.settings.hoverUnit then return end
+   local _,unit=tooltip:GetUnit()
+   if unit and UnitIsPlayer(unit) then local name,realm=UnitName(unit);H:AddScoreTooltip(tooltip,name,realm) end
+  end)
+ end
  local function hook(name,fn) if type(_G[name])=='function' and not self.scoreHooks[name] then hooksecurefunc(name,fn);self.scoreHooks[name]=true end end
  hook('FriendsFrame_UpdateFriendButton',function(row)
   local name,realm=friendName(row)

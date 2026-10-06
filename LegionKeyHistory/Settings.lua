@@ -7,7 +7,7 @@ H.defaultSettings={
  -- Personal Bests
  hud=true,bestMode='timed',hudOverall=true,hudSpec=true,hudClass=true,hudRole=true,
  -- Scores in the game's own windows: next to the name, and details on hover
- scoreFriends=true,hoverFriends=true,scoreApplicants=true,hoverApplicants=true,scoreSearch=true,hoverSearch=true,scoreTarget=true,
+ scoreFriends=true,hoverFriends=true,scoreApplicants=true,hoverApplicants=true,scoreSearch=true,hoverSearch=true,scoreTarget=true,hoverUnit=true,
  scoreDecimals=false,scoreSuffix=true,scoreColor='4adbc8',
  -- Score tooltip
  tipRanks=true,tipBestRun=true,tipDungeons=true,tipWeekSplit=false,
@@ -284,6 +284,7 @@ function H:CreateSettingsPanel()
  gridRow('Group finder applicants','scoreApplicants','hoverApplicants')
  gridRow('Group finder search results','scoreSearch','hoverSearch')
  gridRow('Target frame',nil,'scoreTarget')
+ gridRow('Player tooltip (mouseover)',nil,'hoverUnit')
  y=y-4
  local styles={{false,true},{true,true},{false,false},{true,false}}
  choice('Score style',150,function() return H:FormatScore(1674.34) end,function()
