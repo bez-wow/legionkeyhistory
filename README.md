@@ -34,8 +34,9 @@ tells you in chat when a new version is out.
 
 - **Scores everywhere:** friends list, group finder applicants and search results show each
   player's score; hover for their overall / spec / class rank and best key per dungeon.
-- **Leaderboard** (`/lkh lb`): search, realm and class filters, click a player to see all their
-  runs, or **Compare** up to five players with the best run per dungeon highlighted.
+- **Leaderboard** (`/lkh lb`): **Players** (search, realm and class filters, click a player to see
+  all their runs) and **Runs** (every run ranked by score, per dungeon, best or latest first).
+  **Compare** up to five players dungeon by dungeon; with two, a bar shows who leads and by how much.
 - **Personal Bests** next to the Dungeon Finder: your score, ranks and best Fortified and
   Tyrannical key per dungeon.
 - **Journal** of every key you finish, with tank / healer / DPS, affixes and time; stats on

@@ -686,6 +686,20 @@ function H:RefreshLeaderboard()
  local f=self.leaderboardFrame;if not f then return end
  if f.help and f.title then f.help:ClearAllPoints();f.help:SetPoint('LEFT',f.title,'LEFT',math.ceil(f.title:GetStringWidth() or 300)+12,0) end
  local data=LegionKeyHistoryLeaderboard or {};local rows
+ local runsView=f.view=='runs'
+ f.playersButton:SetEnabled(runsView);f.runsButton:SetEnabled(not runsView)
+ for _,w in ipairs(f.runWidgets or {}) do w:SetShown(runsView) end
+ if runsView then
+  for _,w in ipairs(f.listOnly or {}) do w:Hide() end
+  for _,w in ipairs({f.specButton,f.compareButton,f.compareShow,f.compareView}) do w:Hide() end
+  for _,row in ipairs(f.rows) do row:Hide() end
+  f.compareHint:SetText('');for _,w in ipairs({f.footer,f.prev,f.pages,f.next}) do w:Show() end
+  return self:RefreshRunBoard(f)
+ end
+ for _,line in ipairs(f.runLines or {}) do line:Hide() end
+ f.compareButton:Show()
+ f.footer:SetText('Unofficial score: best per dungeon summed. Click a player to see their runs. Hover for details.')
+ f.empty:SetText('No matching players. Try All realms or update the snapshot.')
  if f.compareOnly and f.compareCount>0 then
   -- Only the picked players, best score first.
   rows={};for row in pairs(f.compare) do rows[#rows+1]=row end
@@ -695,10 +709,12 @@ function H:RefreshLeaderboard()
   rows=self:LeaderboardList(f.search:GetText(),realms[f.realm],f.classID,f.specName)
  end
  f.compareButton:SetText(f.compareMode and 'Stop' or 'Compare')
- f.compareShow:SetShown(f.compareMode);f.compareShow:SetText(f.compareOnly and 'All' or ('Show '..f.compareCount))
- f.compareShow:SetEnabled(f.compareOnly or f.compareCount>=2)
- f.compareHint:SetText(not f.compareMode and '' or f.compareOnly and '|cfff7b500Highlighted: the best run in each dungeon among the players you picked.|r'
-  or ('|cfff7b500Comparing: click up to 5 players to pick them ('..f.compareCount..' picked), then click Show '..f.compareCount..'.|r'))
+ f.compareShow:SetShown(f.compareMode and not f.compareOnly);f.compareShow:SetText('Show '..f.compareCount)
+ f.compareShow:SetEnabled(f.compareCount>=2)
+ f.compareHint:SetText(f.compareMode and not f.compareOnly and ('|cfff7b500Comparing: click up to 5 players to pick them ('..f.compareCount..' picked), then click Show '..f.compareCount..'.|r') or '')
+ -- The comparison replaces the table: only Stop stays.
+ local listing=not f.compareOnly
+ for _,w in ipairs(f.listOnly or {}) do w:SetShown(listing) end
  -- Best run per dungeon among the compared players, by run score.
  local bestOf={}
  if f.compareOnly then
@@ -709,12 +725,12 @@ function H:RefreshLeaderboard()
  end
  local pages=math.max(1,math.ceil(#rows/PAGE));f.page=math.max(1,math.min(f.page,pages))
  f.realmButton:SetText(realms[f.realm]);f.classButton:SetText(labels[f.classID] or 'All classes')
- f.specButton:SetShown(f.classID>0);f.specButton:SetText(f.specName or 'All specs')
- f.status:SetText((data.season or 'No snapshot')..'  |  '..#rows..' players  |  Downloaded '..(data.downloaded or 'never'))
+ f.specButton:SetShown(f.classID>0 and listing);f.specButton:SetText(f.specName or 'All specs')
+ f.status:SetText((data.season or 'No snapshot')..'  |  '..#rows..' players  |  Downloaded '..(data.downloaded or 'never')..self:DownloadedAgo(data.downloaded))
  f.pages:SetText(f.page..' / '..pages);f.prev:SetEnabled(f.page>1);f.next:SetEnabled(f.page<pages)
- f.empty:SetShown(#rows==0)
+ f.empty:SetShown(#rows==0 and listing)
  for i,row in ipairs(f.rows) do
-  local position=(f.page-1)*PAGE+i;local entry=rows[position];local p=self:LeaderboardEntry(entry,position,f.specName);row.player=p;row:SetShown(p~=nil)
+  local position=(f.page-1)*PAGE+i;local entry=rows[position];local p=self:LeaderboardEntry(entry,position,f.specName);row.player=p;row:SetShown(p~=nil and listing)
   row.entryRow=type(entry)=='table' and entry.row or entry
   local picked=f.compareMode and not f.compareOnly and row.entryRow and f.compare[row.entryRow]
   if picked then row:SetBackdropBorderColor(.97,.71,0) else row:SetBackdropBorderColor(.10,.15,.20) end
@@ -727,6 +743,90 @@ function H:RefreshLeaderboard()
     local top=f.compareOnly and best and best[1]==bestOf[d.id]
     row.keyBg[j]:SetShown(top and true or false)
    end
+  end
+ end
+ self:RefreshCompareView(f,f.compareOnly and rows or nil)
+end
+-- " (35 min ago)" for the file's "2026-10-07 19:00 UTC" stamp, so the age is clear at a glance.
+-- Both times are read as UTC fields through time(), so the local offset cancels out.
+function H:DownloadedAgo(stamp)
+ local y,mo,d,h,mi=(stamp or ''):match('^(%d+)-(%d+)-(%d+) (%d+):(%d+)')
+ if not y then return '' end
+ local now=date('!*t');if type(now)~='table' then return '' end;now.isdst=false
+ local seconds=time(now)-time({year=tonumber(y),month=tonumber(mo),day=tonumber(d),hour=tonumber(h),min=tonumber(mi),sec=0,isdst=false})
+ if seconds<0 then return '' end
+ local minutes=math.floor(seconds/60)
+ local ago=minutes<1 and 'just now' or minutes<60 and (minutes..' min ago') or minutes<48*60 and (math.floor(minutes/60)..' h ago') or (math.floor(minutes/1440)..' days ago')
+ return ' ('..ago..')'
+end
+-- The comparison: a row per dungeon with each picked player's best run there, the best of them
+-- at full brightness and the others dimmed. Two players get a Lead column between them: a bar
+-- from the middle towards whoever leads, as long as the lead, with the points beside it.
+local SPARE_COLOR={.31,.76,.97}
+local VIEW_LEFT,VIEW_RIGHT,LEAD_MID,LEAD_HALF=232,976,562,110
+local function put(fs,parent,x,y,w,just) fs:ClearAllPoints();fs:SetPoint('TOPLEFT',parent,'TOPLEFT',x,y);fs:SetWidth(w);fs:SetJustifyH(just);fs:Show() end
+function H:RefreshCompareView(f,rows)
+ local view=f.compareView;view:SetShown(rows~=nil);if not rows then return end
+ local data=LegionKeyHistoryLeaderboard or {};local dungeons=data.dungeons or {}
+ local players={};for i,row in ipairs(rows) do players[i]=self:LeaderboardEntry(row) end
+ local n=#players;local duel=n==2
+ local colors,used={},{}
+ for k,p in ipairs(players) do
+  local c=RAID_CLASS_COLORS and RAID_CLASS_COLORS[classes[p.class]];local col={c and c.r or .85,c and c.g or .9,c and c.b or .93}
+  colors[k]=used[p.class] and SPARE_COLOR or col;used[p.class]=true
+ end
+ -- Column k: beside the Lead column for two players, evenly spread otherwise.
+ local function column(k)
+  if duel then return k==1 and VIEW_LEFT or LEAD_MID+LEAD_HALF+20,LEAD_MID-LEAD_HALF-20-VIEW_LEFT,k==1 and 'RIGHT' or 'LEFT' end
+  local w=math.floor((VIEW_RIGHT-VIEW_LEFT)/n);return VIEW_LEFT+(k-1)*w,w,'CENTER'
+ end
+ for k,h in ipairs(view.heads) do
+  local p=players[k];h.name:SetShown(p~=nil);h.sub:SetShown(p~=nil)
+  if p then
+   local x,w,just=column(k)
+   put(h.name,view,x+8,-8,w,just);put(h.sub,view,x+8,-26,w,just)
+   h.name:SetText(p.name);h.name:SetTextColor(colors[k][1],colors[k][2],colors[k][3])
+   h.sub:SetText(string.format('%.1f  |  #%d',p.score,self:PlayerRank(p) or p.rank))
+  end
+ end
+ view.leadHead:SetShown(duel)
+ -- Points between the two per dungeon, and the largest, so the bars share one scale.
+ local largest=duel and math.abs(players[1].score-players[2].score) or 0
+ if duel then
+  for _,d in ipairs(dungeons) do
+   local x,y=players[1].best[d.id],players[2].best[d.id]
+   largest=math.max(largest,math.abs((x and x[1] or 0)-(y and y[1] or 0)))
+  end
+ end
+ largest=math.max(largest,1)
+ local function lead(r,diff)
+  local points=math.floor(math.abs(diff)*10+.5)/10;local side=diff>=0 and 1 or 2;local c=colors[side]
+  r.mid:Show();r.bar:SetShown(points>0)
+  if points>0 then
+   r.bar:ClearAllPoints();r.bar:SetColorTexture(c[1],c[2],c[3],.85);r.bar:SetSize(math.max(2,LEAD_HALF*points/largest),8)
+   r.bar:SetPoint(side==1 and 'RIGHT' or 'LEFT',r,'LEFT',LEAD_MID,0)
+  end
+  r.value:SetText(points==0 and '=' or string.format('+%.1f',points))
+  if points==0 then r.value:SetTextColor(.55,.55,.55) else r.value:SetTextColor(c[1],c[2],c[3]) end
+  if side==1 then put(r.value,r,LEAD_MID+6,-9,70,'LEFT') else put(r.value,r,LEAD_MID-76,-9,70,'RIGHT') end
+ end
+ for i,r in ipairs(view.lines) do
+  local d=dungeons[i];local total=i==#dungeons+1;r:SetShown(d~=nil or total)
+  if d or total then
+   local values={}
+   for k,p in ipairs(players) do
+    local b=d and p.best[d.id];values[k]=total and p.score or (b and b[1] or 0)
+    local x,w,just=column(k);put(r.cells[k],r,x,-8,w,just)
+    r.cells[k]:SetText(total and string.format('%.1f',p.score)
+     or b and (self:KeyText(b[2],self:KeyUpgrades(b[3],self:DungeonTimer(i)),10)..'   '..string.format('%.1f',b[1])) or '|cff657080-|r')
+   end
+   for k=n+1,#r.cells do r.cells[k]:Hide() end
+   local top=math.max(0,unpack(values))
+   for k in ipairs(players) do r.cells[k]:SetAlpha((n>1 and values[k]>0 and values[k]<top) and .45 or 1) end
+   local map=d and (data.historyMaps or {})[i]
+   r.icon:SetShown(map~=nil);if map then r.icon:SetTexture(self:DungeonIcon(map.mapID)) end
+   r.name:SetText(total and 'SCORE' or d.name)
+   if duel then lead(r,values[1]-values[2]) else r.mid:Hide();r.bar:Hide();r.value:Hide() end
   end
  end
 end
@@ -747,8 +847,8 @@ function H:CreateLeaderboard()
  f.status=text(f,11,24,-51,980)
  f.search=CreateFrame('EditBox',nil,f,'InputBoxTemplate');f.search:SetSize(270,22);f.search:SetPoint('TOPLEFT',29,-87);f.search:SetAutoFocus(false)
  f.search:SetScript('OnEscapePressed',function(s) s:ClearFocus() end)
- text(f,10,24,-72,280,'SEARCH PLAYER / REALM')
- f.realm=2;f.classID=0;f.page=1
+ f.searchLabel=text(f,10,24,-72,280,'SEARCH PLAYER / REALM')
+ f.realm=2;f.classID=0;f.page=1;f.dungeon=false
  f.realmButton=button(f,'Evermoon',125,321,-86,function() f.realm=f.realm%#realms+1;f.page=1;H:RefreshLeaderboard() end)
  f.classButton=button(f,'All classes',125,458,-86,function() f.classID=(f.classID+1)%13;f.specName=nil;f.page=1;H:RefreshLeaderboard() end)
  f.specButton=button(f,'All specs',125,595,-86,function()
@@ -760,8 +860,8 @@ function H:CreateLeaderboard()
   end
   EasyMenu(menu,f.specMenu,'cursor',0,0,'MENU')
  end)
- button(f,'Find me',75,732,-86,function() f.realm=1;f.classID=0;f.specName=nil;f.page=1;f.search:SetText(UnitName('player') or '');H:RefreshLeaderboard() end)
- button(f,'Clear',65,817,-86,function() f.realm=2;f.classID=0;f.specName=nil;f.page=1;f.search:SetText('');H:RefreshLeaderboard() end)
+ f.findButton=button(f,'Find me',75,732,-86,function() f.realm=1;f.classID=0;f.specName=nil;f.page=1;f.search:SetText(UnitName('player') or '');H:RefreshLeaderboard() end)
+ f.clearButton=button(f,'Clear',65,817,-86,function() f.realm=2;f.classID=0;f.specName=nil;f.page=1;f.search:SetText('');H:RefreshLeaderboard() end)
  -- "i" next to the title: how the score works and where the data comes from.
  local help=CreateFrame('Button',nil,f);help:SetSize(22,22);help:SetPoint('TOPLEFT',335,-22);f.help=help
  help:SetBackdrop(backdrop);help:SetBackdropColor(.06,.08,.105,1);help:SetBackdropBorderColor(.29,.86,.78)
@@ -788,6 +888,31 @@ function H:CreateLeaderboard()
  end);help:SetScript('OnLeave',function() GameTooltip:Hide() end)
  -- Compare: pick players (click their rows), then Show to see only them, with the best
  -- run in each dungeon highlighted.
+ -- Runs view: dungeon tiles as on the journal, smaller: All (default) or one dungeon.
+ f.dungeonTiles={}
+ for j=0,#(data.dungeons or {}) do
+  local d=(data.dungeons or {})[j];local map=(data.historyMaps or {})[j]
+  local b=CreateFrame('Button',nil,f);b:SetSize(46,46);b:SetPoint('TOPLEFT',24+j*50,-82);b.slot=d and j or 0
+  b:SetBackdrop(backdrop);b:SetBackdropColor(.06,.085,.11,1);b:SetBackdropBorderColor(.16,.20,.25)
+  local icon=b:CreateTexture(nil,'ARTWORK');icon:SetSize(28,28);icon:SetPoint('TOP',0,-3);icon:SetTexCoord(.07,.93,.07,.93)
+  icon:SetTexture(map and map.mapID and H:DungeonIcon(map.mapID) or 'Interface\\Icons\\INV_Misc_Map_01')
+  local label=text(b,8,0,-33,46,d and d.short or 'ALL');label:SetJustifyH('CENTER')
+  b:SetHighlightTexture('Interface\\Buttons\\ButtonHilight-Square','ADD')
+  b:SetScript('OnClick',function(s) f.dungeon=s.slot>0 and s.slot or false;f.page=1;H:RefreshLeaderboard() end)
+  b:SetScript('OnEnter',function(s) GameTooltip:SetOwner(s,'ANCHOR_TOP');GameTooltip:SetText(d and d.name or 'All dungeons')
+   GameTooltip:AddLine(d and 'Runs in this dungeon only' or 'Runs in every dungeon',.6,.8,.8);GameTooltip:Show() end)
+  b:SetScript('OnLeave',function() GameTooltip:Hide() end)
+  f.dungeonTiles[#f.dungeonTiles+1]=b
+ end
+ -- Players or Runs. The Runs view ranks every run in the file by its score, as on the website.
+ f.view='players';f.runOrder='best'
+ f.playersButton=button(f,'Players',80,690,-20,function() f.view='players';f.page=1;H:RefreshLeaderboard() end)
+ f.runsButton=button(f,'Runs',80,775,-20,function() f.view='runs';f.page=1;H:RefreshLeaderboard() end)
+ f.runOrderButton=button(f,'Order: Best',115,895,-94,function() f.runOrder=f.runOrder=='best' and 'latest' or 'best';f.page=1;H:RefreshLeaderboard() end)
+ f.runHeaders,f.runLines=H:CreateRunLines(f,-140,-158)
+ f.runWidgets={f.runOrderButton}
+ for _,w in ipairs(f.runHeaders) do f.runWidgets[#f.runWidgets+1]=w end
+ for _,b in ipairs(f.dungeonTiles) do f.runWidgets[#f.runWidgets+1]=b end
  f.compare={};f.compareCount=0;f.compareMode=false;f.compareOnly=false
  f.compareButton=button(f,'Compare',70,895,-86,function()
   f.compareMode=not f.compareMode
@@ -796,8 +921,9 @@ function H:CreateLeaderboard()
  end)
  f.compareShow=button(f,'Show',60,970,-86,function() f.compareOnly=not f.compareOnly;f.page=1;H:RefreshLeaderboard() end)
  f.compareHint=text(f,11,24,-112,980,'')
- text(f,10,24,-126,45,'RANK');text(f,10,79,-126,205,'PLAYER');text(f,10,290,-126,105,'REALM');text(f,10,402,-126,75,'SCORE')
- for j,d in ipairs(data.dungeons or {}) do text(f,10,486+(j-1)*59,-126,56,d.short) end
+ f.tableHeaders={text(f,10,24,-126,45,'RANK'),text(f,10,79,-126,205,'PLAYER'),text(f,10,290,-126,105,'REALM')};f.scoreHeader=text(f,10,402,-126,75,'SCORE')
+ f.dungeonHeaders={}
+ for j,d in ipairs(data.dungeons or {}) do f.dungeonHeaders[j]=text(f,10,486+(j-1)*59,-126,56,d.short) end
  f.rows={}
  for i=1,PAGE do
   local row=CreateFrame('Button',nil,f);f.rows[i]=row;row:SetSize(992,28);row:SetPoint('TOPLEFT',24,-145-(i-1)*30)
@@ -848,12 +974,36 @@ function H:CreateLeaderboard()
    GameTooltip:Show()
   end);row:SetScript('OnLeave',function() GameTooltip:Hide() end)
  end
+ -- The comparison (RefreshCompareView), in place of the table while comparing.
+ local view=CreateFrame('Frame',nil,f);f.compareView=view;view:SetSize(992,350);view:SetPoint('TOPLEFT',24,-114)
+ view:SetBackdrop(backdrop);view:SetBackdropColor(.035,.05,.07,1);view:SetBackdropBorderColor(.10,.15,.20)
+ text(view,10,12,-16,200,'DUNGEON')
+ view.heads={}
+ for k=1,5 do
+  local h={name=text(view,13,0,-8,180,''),sub=text(view,10,0,-26,180,'')};h.sub:SetTextColor(.6,.65,.7);view.heads[k]=h
+ end
+ view.leadHead=text(view,10,LEAD_MID-52,-16,120,'LEAD');view.leadHead:SetJustifyH('CENTER');view.leadHead:SetTextColor(.97,.71,0)
+ view.lines={}
+ for i=1,#(data.dungeons or {})+1 do
+  local r=CreateFrame('Frame',nil,view);r:SetSize(976,28);r:SetPoint('TOPLEFT',8,-46-(i-1)*29)
+  local bg=r:CreateTexture(nil,'BACKGROUND');bg:SetAllPoints();bg:SetColorTexture(1,1,1,i%2==1 and .03 or 0)
+  r.icon=r:CreateTexture(nil,'ARTWORK');r.icon:SetSize(22,22);r.icon:SetPoint('LEFT',4,0);r.icon:SetTexCoord(.07,.93,.07,.93)
+  r.name=text(r,11,32,-8,190,'')
+  r.cells={};for k=1,5 do r.cells[k]=text(r,11,0,-8,180,'') end
+  r.mid=r:CreateTexture(nil,'ARTWORK');r.mid:SetColorTexture(.35,.4,.45,1);r.mid:SetSize(1,18);r.mid:SetPoint('CENTER',r,'LEFT',LEAD_MID,0)
+  r.bar=r:CreateTexture(nil,'ARTWORK');r.value=text(r,10,0,-9,70,'')
+  view.lines[i]=r
+ end
+ view:Hide()
  f.empty=text(f,14,25,-200,980,'No matching players. Try All realms or update the snapshot.');f.empty:SetJustifyH('CENTER')
- text(f,10,24,-521,780,'Unofficial score: best per dungeon summed. Click a player to see their runs. Hover for details.')
+ f.footer=text(f,10,24,-521,780,'Unofficial score: best per dungeon summed. Click a player to see their runs. Hover for details.')
  f.prev=button(f,'<',30,880,-515,function() f.page=f.page-1;H:RefreshLeaderboard() end)
  f.pages=text(f,11,920,-521,65)
  f.next=button(f,'>',30,986,-515,function() f.page=f.page+1;H:RefreshLeaderboard() end)
  f.search:SetScript('OnTextChanged',function() f.page=1;H:RefreshLeaderboard() end)
+ f.listOnly={f.search,f.searchLabel,f.realmButton,f.classButton,f.findButton,f.clearButton,f.footer,f.prev,f.pages,f.next,f.scoreHeader}
+ for _,w in ipairs(f.tableHeaders) do f.listOnly[#f.listOnly+1]=w end
+ for _,w in ipairs(f.dungeonHeaders) do f.listOnly[#f.listOnly+1]=w end
  f:Hide()
 end
 
@@ -880,23 +1030,61 @@ local function runScore(level,seconds,timer)
  local score=ratio<=1 and (50+7.5*level+12.5*(1-ratio)) or (50+7.5*(level-1)-20*(ratio-1))
  return math.floor(math.max(0,score)*10+.5)/10
 end
+-- One line of the file's run history: map|level|ms|stamp|[score|]affixes|party.
+local function historyFields(line)
+ local map,level,ms,stamp,aff,party=line:match('^(%d+)|(%d+)|(%d+)|(%d+)|([^|]*)|([^|]*)$')
+ if not map then map,level,ms,stamp,aff,party=line:match('^(%d+)|(%d+)|(%d+)|(%d+)|[%d.]+|([^|]*)|([^|]*)$') end
+ return map,level,ms,stamp,aff,party
+end
+-- A run, ready to show, from one history line.
+local function historyRun(data,line)
+ local map,level,ms,stamp,aff,party=historyFields(line);if not map then return nil end
+ local slot=tonumber(map);local info=data.historyMaps[slot] or {}
+ local seconds=tonumber(ms)/1000;local timer=info.timer
+ local dungeon=data.dungeons and data.dungeons[slot] or {}
+ local run={line=line,slot=slot,mapID=info.mapID,dungeon={name=info.name or dungeon.name,short=dungeon.short},level=tonumber(level),seconds=seconds,stamp=tonumber(stamp),
+  affixes={},members={},score=runScore(tonumber(level),seconds,timer),upgrades=H:KeyUpgrades(seconds,timer)}
+ for a in aff:gmatch('%d+') do run.affixes[#run.affixes+1]=tonumber(a) end
+ for r,s in party:gmatch('(%d+):?(%d*)') do run.members[#run.members+1]={row=tonumber(r),spec=data.specs and data.specs[tonumber(s) or 0]} end
+ return run
+end
+-- Every run in the file ranked by run score (best first; the earlier run wins a tie), for all
+-- dungeons (slot nil) or one. Entries are {line,score,stamp,rank}; runs are built per page.
+-- Kept once per file, along with each run's season rank for the players' run lists.
+function H:RunRanking(slot)
+ local data=LegionKeyHistoryLeaderboard;if not data or not data.historyText then return {} end
+ local cache=data.runRanking;if not cache then cache={};data.runRanking=cache end
+ local key=slot or 0;if cache[key] then return cache[key] end
+ local list={}
+ for line in data.historyText:gmatch('[^\n]+') do
+  local map,level,ms,stamp=historyFields(line)
+  if map and (not slot or tonumber(map)==slot) then
+   local info=data.historyMaps[tonumber(map)] or {}
+   list[#list+1]={line=line,score=runScore(tonumber(level),tonumber(ms)/1000,info.timer),stamp=tonumber(stamp)}
+  end
+ end
+ table.sort(list,function(a,b) if a.score~=b.score then return a.score>b.score end;return a.stamp<b.stamp end)
+ for i,e in ipairs(list) do e.rank=i end
+ cache[key]=list
+ if not slot then data.runRankByLine={};for _,e in ipairs(list) do data.runRankByLine[e.line]=e.rank end end
+ return list
+end
+-- The same runs newest first; each keeps its score rank.
+function H:LatestRuns(slot)
+ local data=LegionKeyHistoryLeaderboard or {};local key='latest'..(slot or 0)
+ local cache=data.runRanking or {};if cache[key] then return cache[key] end
+ local list={};for i,e in ipairs(self:RunRanking(slot)) do list[i]=e end
+ table.sort(list,function(a,b) if a.stamp~=b.stamp then return a.stamp>b.stamp end;return a.rank<b.rank end)
+ data.runRanking[key]=list;return list
+end
 -- Every run in the leaderboard file that a character (leaderboard row) played.
 function H:PlayerRuns(row)
  local data=LegionKeyHistoryLeaderboard
  if not row or not data or not data.historyText then return {} end
  local needle=','..row..':';local runs={}
  for line in data.historyText:gmatch('[^\n]+') do
-  local map,level,ms,stamp,aff,party=line:match('^(%d+)|(%d+)|(%d+)|(%d+)|([^|]*)|([^|]*)$')
-  if map and (','..party):find(needle,1,true) then
-   local info=data.historyMaps[tonumber(map)] or {}
-   local seconds=tonumber(ms)/1000;local timer=info.timer
-   local dungeon=data.dungeons and data.dungeons[tonumber(map)] or {}
-   local run={dungeon={name=info.name or dungeon.name,short=dungeon.short},level=tonumber(level),seconds=seconds,stamp=tonumber(stamp),affixes={},members={},
-    score=runScore(tonumber(level),seconds,timer),upgrades=H:KeyUpgrades(seconds,timer)}
-   for a in aff:gmatch('%d+') do run.affixes[#run.affixes+1]=tonumber(a) end
-   for r,s in party:gmatch('(%d+):?(%d*)') do run.members[#run.members+1]={row=tonumber(r),spec=data.specs and data.specs[tonumber(s) or 0]} end
-   runs[#runs+1]=run
-  end
+  local map,_,_,_,_,party=historyFields(line)
+  if map and (','..party):find(needle,1,true) then runs[#runs+1]=historyRun(data,line) end
  end
  return runs
 end
@@ -914,7 +1102,60 @@ local function memberText(data,member)
  local c=RAID_CLASS_COLORS and RAID_CLASS_COLORS[classes[data.classes[member.row]]]
  return c and string.format('|cff%02x%02x%02x%s|r',c.r*255,c.g*255,c.b*255,name) or name
 end
-local RUN_COLUMNS={{'DUNGEON',14,62},{'LEVEL',78,82},{'TIME',162,62},{'AFFIXES',226,70},{'TANK',300,120},{'HEALER',424,120},{'DPS',548,300},{'SCORE',852,60},{'COMPLETED',916,100}}
+-- Run lists (the leaderboard's Runs view and a player's runs): name, x, width. The dungeon's
+-- icon sits left of its name.
+local RUN_COLUMNS={{'RANK',8,40},{'DUNGEON',50,64},{'LEVEL',122,78},{'TIME',204,56},{'AFFIXES',264,68},{'TANK',336,116},{'HEALER',454,116},{'DPS',572,276},{'SCORE',852,56},{'COMPLETED',912,76}}
+local RUN_ICON_X=50
+function H:CreateRunLines(f,headerY,firstY)
+ local headers={}
+ for k,col in ipairs(RUN_COLUMNS) do headers[k]=text(f,10,24+col[2],headerY,col[3],col[1]) end
+ local lines={}
+ for i=1,PAGE do
+  local line=CreateFrame('Button',nil,f);lines[i]=line;line:SetSize(992,28);line:SetPoint('TOPLEFT',24,firstY-(i-1)*30)
+  line:SetBackdrop(backdrop);line:SetBackdropColor(.06,.08,.105,1);line:SetBackdropBorderColor(.10,.15,.20)
+  line:SetHighlightTexture('Interface\\Buttons\\ButtonHilight-Square','ADD')
+  line.cells={};line.affixes={}
+  for k,col in ipairs(RUN_COLUMNS) do
+   local x=col[1]=='DUNGEON' and col[2]+24 or col[2]
+   line.cells[k]=text(line,col[1]=='LEVEL' and 12 or 11,x,-7,col[1]=='DUNGEON' and col[3]-24 or col[3])
+  end
+  line.icon=line:CreateTexture(nil,'ARTWORK');line.icon:SetSize(20,20);line.icon:SetPoint('TOPLEFT',RUN_ICON_X,-4);line.icon:SetTexCoord(.07,.93,.07,.93)
+  for k=1,3 do local icon=line:CreateTexture(nil,'ARTWORK');icon:SetSize(18,18);icon:SetPoint('TOPLEFT',RUN_COLUMNS[5][2]+(k-1)*21,-5);line.affixes[k]=icon end
+  line:SetScript('OnEnter',function(s)
+   local run=s.run;if not run then return end
+   local data=LegionKeyHistoryLeaderboard
+   GameTooltip:SetOwner(s,'ANCHOR_LEFT');GameTooltip:SetText((run.dungeon.name or '?')..' +'..run.level)
+   GameTooltip:AddLine(date('%a %d %b %Y  %H:%M',run.stamp),.8,.85,.9)
+   GameTooltip:AddLine(H:Clock(run.seconds)..(run.upgrades>0 and ('  |cff3fbf5ftimed +'..run.upgrades..'|r') or '  |cffe06666over time|r')..string.format('  |  %.1f',run.score),1,1,1)
+   for _,m in ipairs(run.members) do GameTooltip:AddDoubleLine(memberText(data,m),m.spec and m.spec.name or '',1,1,1,.7,.75,.8) end
+   GameTooltip:Show()
+  end)
+  line:SetScript('OnLeave',function() GameTooltip:Hide() end)
+ end
+ return headers,lines
+end
+function H:FillRunLine(line,run,rank)
+ local data=LegionKeyHistoryLeaderboard;line.run=run;line:SetShown(run~=nil)
+ if not run then return end
+ line.cells[1]:SetText(rank and tostring(rank) or '-')
+ line.icon:SetTexture(run.mapID and self:DungeonIcon(run.mapID) or 'Interface\\Icons\\INV_Misc_Map_01')
+ line.cells[2]:SetText(run.dungeon.short or '?')
+ line.cells[3]:SetText(self:KeyText(run.level,run.upgrades))
+ line.cells[4]:SetText((run.upgrades>0 and '' or '|cff888888')..self:Clock(run.seconds)..(run.upgrades>0 and '' or '|r'))
+ for k=1,3 do
+  local id=run.affixes[k];local icon=line.affixes[k]
+  local texture=id and C_ChallengeMode.GetAffixInfo and select(3,C_ChallengeMode.GetAffixInfo(id))
+  icon:SetTexture(texture);icon:SetShown(texture~=nil)
+ end
+ local tank,healer,dps={},{},{}
+ for _,m in ipairs(run.members) do
+  local role=m.spec and m.spec.role or 'dps'
+  local list=role=='tank' and tank or role=='healer' and healer or dps
+  list[#list+1]=memberText(data,m)
+ end
+ line.cells[6]:SetText(table.concat(tank,'  '));line.cells[7]:SetText(table.concat(healer,'  '));line.cells[8]:SetText(table.concat(dps,'  '))
+ line.cells[9]:SetText(string.format('%.1f',run.score));line.cells[10]:SetText(self:Ago(run.stamp))
+end
 function H:OpenPlayerRuns(row)
  local data=LegionKeyHistoryLeaderboard;if not data or not data.names or not data.names[row] then return end
  if not self.playerRunsFrame then self:CreatePlayerRuns() end
@@ -930,6 +1171,8 @@ function H:RefreshPlayerRuns()
   if f.order=='best' then if a.score~=b.score then return a.score>b.score end end
   return a.stamp>b.stamp
  end)
+ self:RunRanking()
+ local ranks=data.runRankByLine or {}
  local c=RAID_CLASS_COLORS and RAID_CLASS_COLORS[classes[p.class]]
  f.title:SetText((c and string.format('|cff%02x%02x%02x',c.r*255,c.g*255,c.b*255) or '')..p.name..'|r  '..p.realm)
  f.status:SetText(string.format('%.1f points  |  Rank %s  |  %d runs in the leaderboard file',p.score,tostring(self:PlayerRank(p) or '?'),#runs))
@@ -938,25 +1181,7 @@ function H:RefreshPlayerRuns()
  f.pages:SetText(f.page..' / '..pages);f.prev:SetEnabled(f.page>1);f.next:SetEnabled(f.page<pages)
  f.empty:SetShown(#runs==0)
  for i,line in ipairs(f.rows) do
-  local run=runs[(f.page-1)*PAGE+i];line.run=run;line:SetShown(run~=nil)
-  if run then
-   line.cells[1]:SetText(run.dungeon.short or '?')
-   line.cells[2]:SetText(self:KeyText(run.level,run.upgrades))
-   line.cells[3]:SetText((run.upgrades>0 and '' or '|cff888888')..self:Clock(run.seconds)..(run.upgrades>0 and '' or '|r'))
-   for k=1,3 do
-    local id=run.affixes[k];local icon=line.affixes[k]
-    local texture=id and C_ChallengeMode.GetAffixInfo and select(3,C_ChallengeMode.GetAffixInfo(id))
-    icon:SetTexture(texture);icon:SetShown(texture~=nil)
-   end
-   local tank,healer,dps={},{},{}
-   for _,m in ipairs(run.members) do
-    local role=m.spec and m.spec.role or 'dps'
-    local list=role=='tank' and tank or role=='healer' and healer or dps
-    list[#list+1]=memberText(data,m)
-   end
-   line.cells[5]:SetText(table.concat(tank,'  '));line.cells[6]:SetText(table.concat(healer,'  '));line.cells[7]:SetText(table.concat(dps,'  '))
-   line.cells[8]:SetText(string.format('%.1f',run.score));line.cells[9]:SetText(self:Ago(run.stamp))
-  end
+  local run=runs[(f.page-1)*PAGE+i];self:FillRunLine(line,run,run and ranks[run.line])
  end
 end
 function H:CreatePlayerRuns()
@@ -971,33 +1196,33 @@ function H:CreatePlayerRuns()
  f.orderButton=button(f,'Order: Latest',115,755,-20,function() f.order=f.order=='best' and 'latest' or 'best';f.page=1;H:RefreshPlayerRuns() end)
  button(f,'Leaderboard',105,875,-20,function() f:Hide() end)
  button(f,'X',24,994,-20,function() f:Hide() end)
- for _,col in ipairs(RUN_COLUMNS) do text(f,10,24+col[2],-90,col[3],col[1]) end
- f.rows={}
- for i=1,PAGE do
-  local line=CreateFrame('Button',nil,f);f.rows[i]=line;line:SetSize(992,30);line:SetPoint('TOPLEFT',24,-108-(i-1)*32)
-  line:SetBackdrop(backdrop);line:SetBackdropColor(.06,.08,.105,1);line:SetBackdropBorderColor(.10,.15,.20)
-  line:SetHighlightTexture('Interface\\Buttons\\ButtonHilight-Square','ADD')
-  line.cells={};line.affixes={}
-  for k,col in ipairs(RUN_COLUMNS) do line.cells[k]=text(line,col[1]=='LEVEL' and 12 or 11,col[2],-8,col[3]) end
-  for k=1,3 do local icon=line:CreateTexture(nil,'ARTWORK');icon:SetSize(18,18);icon:SetPoint('TOPLEFT',RUN_COLUMNS[4][2]+(k-1)*21,-6);line.affixes[k]=icon end
-  line:SetScript('OnEnter',function(s)
-   local run=s.run;if not run then return end
-   local data=LegionKeyHistoryLeaderboard
-   GameTooltip:SetOwner(s,'ANCHOR_LEFT');GameTooltip:SetText((run.dungeon.name or '?')..' +'..run.level)
-   GameTooltip:AddLine(date('%a %d %b %Y  %H:%M',run.stamp),.8,.85,.9)
-   GameTooltip:AddLine(H:Clock(run.seconds)..(run.upgrades>0 and ('  |cff3fbf5ftimed +'..run.upgrades..'|r') or '  |cffe06666over time|r')..string.format('  |  %.1f',run.score),1,1,1)
-   for _,m in ipairs(run.members) do GameTooltip:AddDoubleLine(memberText(data,m),m.spec and m.spec.name or '',1,1,1,.7,.75,.8) end
-   GameTooltip:Show()
-  end)
-  line:SetScript('OnLeave',function() GameTooltip:Hide() end)
- end
+ local _,lines=self:CreateRunLines(f,-90,-108);f.rows=lines
  f.empty=text(f,14,25,-200,980,'No runs for this player in the leaderboard file.');f.empty:SetJustifyH('CENTER')
- text(f,10,24,-521,780,'Runs in the leaderboard file. Score: unofficial run score. Hover a run for the date and the group.')
+ text(f,10,24,-521,780,'Runs in the leaderboard file. Rank: the run\'s place among every run of the season. Hover a run for the date and the group.')
  f.prev=button(f,'<',30,880,-515,function() f.page=f.page-1;H:RefreshPlayerRuns() end)
  f.pages=text(f,11,920,-521,65)
  f.next=button(f,'>',30,986,-515,function() f.page=f.page+1;H:RefreshPlayerRuns() end)
  if self.ApplyFont then self:ApplyFont(f) end
  f:Hide()
+end
+-- The leaderboard's Runs view: every run in the file by run score, for all dungeons or the
+-- dungeon tile picked; Latest lists them newest first, each keeping its rank.
+function H:RefreshRunBoard(f)
+ local data=LegionKeyHistoryLeaderboard or {};local slot=f.dungeon or nil
+ local list=f.runOrder=='latest' and self:LatestRuns(slot) or self:RunRanking(slot)
+ for _,b in ipairs(f.dungeonTiles or {}) do
+  local on=b.slot==(f.dungeon or 0);b:SetBackdropBorderColor(on and .29 or .16,on and .86 or .20,on and .78 or .25)
+ end
+ f.runOrderButton:SetText(f.runOrder=='latest' and 'Order: Latest' or 'Order: Best')
+ local name=slot and data.dungeons and data.dungeons[slot] and data.dungeons[slot].name
+ f.status:SetText((data.season or 'No snapshot')..'  |  '..#list..' runs  |  '..(name or 'All dungeons')..'  |  Downloaded '..(data.downloaded or 'never')..self:DownloadedAgo(data.downloaded))
+ local pages=math.max(1,math.ceil(#list/PAGE));f.page=math.max(1,math.min(f.page,pages))
+ f.pages:SetText(f.page..' / '..pages);f.prev:SetEnabled(f.page>1);f.next:SetEnabled(f.page<pages)
+ f.footer:SetText('Every run in the leaderboard file by run score (unofficial). Latest: newest first, each keeping its rank. Hover a run for the group.')
+ f.empty:SetText('No runs in the leaderboard file. Run LKH Updater.cmd, then /reload.');f.empty:SetShown(#list==0)
+ for i,line in ipairs(f.runLines) do
+  local e=list[(f.page-1)*PAGE+i];self:FillRunLine(line,e and historyRun(data,e.line),e and e.rank)
+ end
 end
 
 -- Runs imported before roles were kept: fill in each member's role and class from the
