@@ -46,7 +46,7 @@ tells you in chat when a new version is out.
 
 Keys you complete count straight away for everyone in that group; other runs arrive with the
 next leaderboard update. Scores are unofficial: the sum of each character's best run score per
-dungeon (formula from [Tauri Achievements](https://github.com/tauriachievements/tauriachievements.github.io)).
+dungeon (formula from [Tauri Achievements](https://tauriachievements.github.io/mythic-plus/scoring)).
 
 ## Screenshots
 
