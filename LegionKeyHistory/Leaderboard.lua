@@ -2,6 +2,8 @@ local H=LegionKeyHistory
 -- Lowercase A-Z only, exactly like update_leaderboard.py, so name keys never depend on the
 -- client's locale (a locale-aware lower() can rewrite the bytes of accented letters).
 local function lowerASCII(s) return (s:gsub('[A-Z]',string.lower)) end
+-- Pixels the applicant Role column gives to Name (role icons shrink from 18px to 14px).
+local ROLE_TRIM=18
 -- Leaderboard-file roles and class ids as recorded runs store them.
 local FILE_ROLES={tank='TANK',healer='HEALER',dps='DAMAGER'}
 local classes={'WARRIOR','PALADIN','HUNTER','ROGUE','PRIEST','DEATHKNIGHT','SHAMAN','MAGE','WARLOCK','MONK','DRUID','DEMONHUNTER'}
@@ -14,12 +16,17 @@ function H:SameSnapshotRun(a,b)
  local matched=0;for _,m in ipairs(b.members or {}) do if names[self:ScoreKey(m.name)] then matched=matched+1 end end
  return matched>=3
 end
-function H:SnapshotRuns(data)
+-- rows (optional): only runs with one of these leaderboard rows in the group. Rosters are the
+-- only "row:spec" pairs on a line, so a plain search skips other runs without parsing them.
+function H:SnapshotRuns(data,rows)
  return coroutine.wrap(function()
   if data.historyText then
    for line in data.historyText:gmatch('[^\n]+') do
-    local map,level,ms,stamp,score,aff,party=line:match('^(%d+)|(%d+)|(%d+)|(%d+)|([%d.]+)|([^|]*)|([^|]*)$')
-    if not map then map,level,ms,stamp,aff,party=line:match('^(%d+)|(%d+)|(%d+)|(%d+)|([^|]*)|([^|]*)$') end
+    local wanted=not rows
+    for _,row in ipairs(rows or {}) do if line:find('[|,]'..row..':') then wanted=true;break end end
+    local map,level,ms,stamp,score,aff,party
+    if wanted then map,level,ms,stamp,score,aff,party=line:match('^(%d+)|(%d+)|(%d+)|(%d+)|([%d.]+)|([^|]*)|([^|]*)$') end
+    if wanted and not map then map,level,ms,stamp,aff,party=line:match('^(%d+)|(%d+)|(%d+)|(%d+)|([^|]*)|([^|]*)$') end
     if map then
      local roster,affixes={},{}
      if data.names then for row,spec in party:gmatch('(%d+):?(%d*)') do roster[#roster+1]={tonumber(row),tonumber(spec)} end
@@ -36,12 +43,23 @@ function H:SnapshotRuns(data)
   end
  end)
 end
-function H:ImportSnapshot()
+function H:ImportSnapshot(silent)
  local data=LegionKeyHistoryLeaderboard or {}
- if not (data.historyText or data.history) or not (data.historyPlayers or data.names) then self.Message('No run history in this file. Run Update Leaderboard.cmd, then /reload.');return 0 end
+ if not (data.historyText or data.history) or not (data.historyPlayers or data.names) then
+  if not silent then self.Message('No run history in this file. Run LKH Updater.cmd, then /reload.') end
+  return 0,0
+ end
  local name,realm=UnitName('player');realm=realm and realm~='' and realm or GetRealmName()
  local me=self:ScoreKey(name,realm);local added,skipped=0,0
- for d,r in self:SnapshotRuns(data) do
+ -- This character's leaderboard row(s), so only their own runs are read.
+ local rows
+ if data.names and data.historyText then
+  rows={};local lower=lowerASCII(name)
+  for i,key in ipairs(data.names) do
+   if key==lower and self:ScoreKey(self:LeaderboardFullName(i,data))==me then rows[#rows+1]=i end
+  end
+ end
+ for d,r in self:SnapshotRuns(data,rows) do
   local mine=false;local members={};local identities={}
   for _,pair in ipairs(r[6]) do
    local full=self:LeaderboardFullName(pair[1],data)
@@ -61,9 +79,21 @@ function H:ImportSnapshot()
    end
   end
  end
- self.Message(string.format('%s: imported %d missing runs; skipped %d existing runs. File coverage only.',name,added,skipped))
- if self.Refresh then self:Refresh() end
+ if not silent then self.Message(string.format('%s: imported %d missing runs; skipped %d existing runs. File coverage only.',name,added,skipped)) end
+ if added>0 and self.Refresh then self:Refresh() end
  return added,skipped
+end
+-- After login: add this character's runs from the leaderboard file to the journal and Personal
+-- Bests, once per downloaded file, so they never lag behind the scores in tooltips.
+function H:AutoImportSnapshot()
+ local stamp=LegionKeyHistoryLeaderboard and LegionKeyHistoryLeaderboard.downloaded
+ if not stamp or not self.db then return end
+ local name,realm=UnitName('player');local key=self:ScoreKey(name,(realm and realm~='') and realm or GetRealmName())
+ self.db.importStamps=self.db.importStamps or {}
+ if self.db.importStamps[key]==stamp then return end
+ local added=self:ImportSnapshot(true)
+ self.db.importStamps[key]=stamp
+ if added and added>0 then self.Message(string.format('Added %d of your runs from the leaderboard file.',added)) end
 end
 -- UnitName() gives an empty realm for characters on your own realm; IdentityKey treats it
 -- like none. Realm spellings ("[HU] Tauri WoW Server", "Tauri") share one key.
@@ -228,6 +258,63 @@ function H:PersonalScore()
  local total=0;for _,score in pairs(best) do total=total+score end
  return total,best
 end
+-- Legion dungeons drop "(Mythic Keystone)" and "(Mythic)": "Darkheart Thicket (Mythic)" ->
+-- "Darkheart Thicket". Older dungeons keep theirs ("Lost City of the Tol'vir (Heroic)").
+local LEGION_DUNGEONS={'Assault on Violet Hold','Return to Karazhan','Cathedral of Eternal Night','Seat of the Triumvirate'}
+local function isLegionDungeon(name)
+ name=name:lower()
+ for _,d in ipairs((LegionKeyHistoryLeaderboard or {}).dungeons or {}) do if name:find(d.name:lower(),1,true)==1 then return true end end
+ for _,d in ipairs(LEGION_DUNGEONS) do if name:find(d:lower(),1,true)==1 then return true end end
+ return false
+end
+function H:CleanActivityName(name)
+ name=tostring(name or '')
+ local base=name:match('^(.-)%s*%(Mythic Keystone%)%s*$') or name:match('^(.-)%s*%(Mythic%)%s*$')
+ if base and isLegionDungeon(base) then return base end
+ return name
+end
+-- Writes a group finder search row (also the preview in settings) in the chosen style:
+--   leaderTop   "M7 VOTW - Leader 1008" over the dungeon name
+--   dungeonTop  "M7 VOTW - Vault of the Wardens" (or the short name when that does not fit)
+--               over "Leader 1008"
+--   plain       the group title over the dungeon name
+-- faded: delisted or finished rows, kept in Blizzard's grey. score: fixed score for previews.
+function H:FormatSearchRow(nameText,activityText,title,activityName,short,leader,width,faded,score)
+ title=tostring(title or '');local dungeon=self:CleanActivityName(activityName)
+ local style=self.settings.searchStyle
+ local leaderText
+ if leader and style~='plain' then
+  if not score then local p=self:PlayerScore(leader);score=p and p.score end
+  local _,_,_,hex=self:ScoreColor(score)
+  leaderText=faded and (leader..' '..self:FormatScore(score)) or ('|cffffffff'..leader..'|r '..hex..self:FormatScore(score)..'|r')
+ end
+ local sep=faded and ' - ' or '|cff666666 - |r'
+ -- One line only: a wrapped top line would run into the dungeon line below it.
+ if nameText.SetWordWrap then nameText:SetWordWrap(false) end
+ local function fits(text) nameText:SetWidth(0);nameText:SetText(text);return (nameText:GetStringWidth() or 0)<=width end
+ -- Group title plus an extra part; when it does not fit, the title is shortened so the extra
+ -- part (leader and score, or dungeon) stays readable.
+ local function fitTitle(extra)
+  if fits(title..sep..extra) then return true end
+  for n=#title-1,1,-1 do
+   if fits(title:sub(1,n)..'...'..sep..extra) then return true end
+  end
+  return false
+ end
+ local second=dungeon
+ if style=='dungeonTop' and dungeon~='' then
+  local full=faded and dungeon or ('|cffa8a8a8'..dungeon..'|r')
+  if not fits(title..sep..full) and short then fitTitle(faded and short or ('|cffa8a8a8'..short..'|r')) end
+  second=leaderText or ''
+ elseif style=='leaderTop' and leaderText then
+  fitTitle(leaderText)
+ else
+  fits(title)
+ end
+ -- Anything still too long ends in "..." instead of running under the role icons.
+ if (nameText:GetStringWidth() or 0)>width then nameText:SetWidth(width) end
+ activityText:SetText(second)
+end
 function H:TooltipDungeon(activityID)
  if not activityID or not C_LFGList.GetActivityInfo then return end
  local activity=C_LFGList.GetActivityInfo(activityID)
@@ -246,14 +333,62 @@ function H:PrepareScoreTooltip(p)
   p.tooltipRows[d.id]=b and string.format('+%d  %s  |  %.1f IO',b[2],self:Clock(b[3]),b[1]) or '-'
  end
 end
+-- Tooltip rows whose right side is split into columns (key, time, score) that line up from row
+-- to row. The game draws the right text right-aligned in a proportional font, so a "+8" or a
+-- narrow "1" shifts everything; each part gets its own right-aligned font string instead, and the
+-- real right text keeps the width (invisible) so the tooltip sizes itself as before.
+local measure
+local function measureWidth(text)
+ measure:SetText(text);return measure:GetStringWidth()
+end
+local function clearColumns(tooltip)
+ for _,right in ipairs(tooltip.lkhAligned or {}) do right:SetAlpha(1) end
+ for _,cols in pairs(tooltip.lkhCols or {}) do for _,fs in ipairs(cols) do fs:Hide() end end
+ tooltip.lkhAligned={}
+end
+local function alignColumns(tooltip,rows)
+ local name=tooltip.GetName and tooltip:GetName()
+ if not name or #rows==0 or not _G[name..'TextRight'..rows[1].line] then return end
+ if not tooltip.lkhAlignHook then
+  tooltip.lkhAlignHook=true;tooltip:HookScript('OnTooltipCleared',clearColumns)
+ end
+ local font,size,flags=_G[name..'TextRight'..rows[1].line]:GetFont()
+ measure=measure or UIParent:CreateFontString(nil,'BACKGROUND');measure:SetFont(font,size,flags)
+ local gap=measureWidth('x  x')-measureWidth('xx')
+ local widths,widest={},{}
+ for _,row in ipairs(rows) do
+  for c,part in ipairs(row.parts) do
+   local w=measureWidth(part)
+   if w>(widths[c] or -1) then widths[c],widest[c]=w,part end
+  end
+ end
+ local placeholder=table.concat(widest,'  ')
+ tooltip.lkhCols=tooltip.lkhCols or {};tooltip.lkhAligned=tooltip.lkhAligned or {}
+ for _,row in ipairs(rows) do
+  local right=_G[name..'TextRight'..row.line]
+  right:SetText(placeholder);right:SetAlpha(0);tooltip.lkhAligned[#tooltip.lkhAligned+1]=right
+  local cols=tooltip.lkhCols[row.line] or {};tooltip.lkhCols[row.line]=cols
+  local x=0
+  for c=#row.parts,1,-1 do
+   local fs=cols[c]
+   if not fs then fs=tooltip:CreateFontString(nil,'ARTWORK');fs:SetJustifyH('RIGHT');cols[c]=fs end
+   fs:SetFont(font,size,flags);fs:SetTextColor(1,1,1);fs:ClearAllPoints();fs:SetPoint('RIGHT',right,'RIGHT',-x,0)
+   fs:SetText(row.parts[c]);fs:Show()
+   x=x+widths[c]+gap
+  end
+ end
+end
 function H:AddScoreTooltip(tooltip,name,realm,selected)
  if not name then return end
+ local aligned={}
  local p=self:PlayerScore(name,realm)
  self:PrepareScoreTooltip(p)
  tooltip:AddLine(' ')
  tooltip:AddLine('LKH Mythic+ Score',.29,.86,.78)
  if not p then tooltip:AddLine('Not in the downloaded snapshot.',.7,.7,.7);tooltip:Show();return end
- tooltip:AddDoubleLine('Current score',string.format('%.1f',p.score),1,1,1,1,.82,0)
+ local sr,sg,sb=1,.82,0
+ if self.settings.scoreColorMode~='custom' then sr,sg,sb=self:ScoreColor(p.score) end
+ tooltip:AddDoubleLine('Current score',string.format('%.1f',p.score),1,1,1,sr,sg,sb)
  -- Overall rank in the snapshot (players only seen in local runs have none).
  local showRanks=self.settings.tipRanks
  local rank=showRanks and self:PlayerRank(p)
@@ -283,14 +418,21 @@ function H:AddScoreTooltip(tooltip,name,realm,selected)
  local bestID,best
  for id,b in pairs(p.best) do if not best or b[1]>best[1] then bestID,best=id,b end end
  for _,d in ipairs(self.settings.tipBestRun and (LegionKeyHistoryLeaderboard or {}).dungeons or {}) do
-  if d.id==bestID then tooltip:AddDoubleLine('Best run',d.short..' +'..best[2],.8,.85,.9,1,1,1) end
-  if d.id==selected then local b=p.best[d.id];tooltip:AddDoubleLine('Best for dungeon',d.short..(b and (' +'..b[2]) or ' --'),.3,1,.5,.3,1,.5) end
+  -- In the group finder (selected = the listed dungeon) the best run turns green when it is in
+  -- that dungeon; otherwise "Best for dungeon" adds the player's key there.
+  if d.id==bestID then
+   if bestID==selected then tooltip:AddDoubleLine('Best run',d.short..' +'..best[2],.3,1,.5,.3,1,.5)
+   else tooltip:AddDoubleLine('Best run',d.short..' +'..best[2],.8,.85,.9,1,1,1) end
+  end
+  if d.id==selected and bestID~=selected then local b=p.best[d.id];tooltip:AddDoubleLine('Best for dungeon',d.short..(b and (' +'..b[2]) or ' --'),.3,1,.5,.3,1,.5) end
  end
  local dungeons=(LegionKeyHistoryLeaderboard or {}).dungeons or {}
  if self.settings.tipDungeons then
   tooltip:AddLine(' ')
   for _,d in ipairs(dungeons) do
    tooltip:AddDoubleLine((d.id==selected and '|cff4dff80> ' or '')..d.short..(d.id==selected and '|r' or ''),p.tooltipRows[d.id],.8,.85,.9,1,1,1)
+   local b=p.best[d.id]
+   if b then aligned[#aligned+1]={line=tooltip:NumLines(),parts={'+'..b[2],self:Clock(b[3]),'|',string.format('%.1f IO',b[1])}} end
   end
  end
  -- Best Fortified / Tyrannical key per dungeon; grey when that run was over time.
@@ -299,11 +441,15 @@ function H:AddScoreTooltip(tooltip,name,realm,selected)
   tooltip:AddLine(' ');tooltip:AddDoubleLine('Fortified / Tyrannical',' ',.29,.86,.78,1,1,1)
   for _,d in ipairs(dungeons) do
    local w=p.weekBest[d.id]
-   if w then tooltip:AddDoubleLine(d.short,level(w.fort)..'  /  '..level(w.tyr),.8,.85,.9,1,1,1) end
+   if w then
+    tooltip:AddDoubleLine(d.short,level(w.fort)..'  /  '..level(w.tyr),.8,.85,.9,1,1,1)
+    aligned[#aligned+1]={line=tooltip:NumLines(),parts={level(w.fort),'/',level(w.tyr)}}
+   end
   end
  end
  if p.localUpdated then tooltip:AddLine('Includes locally recorded party runs.',.29,.86,.78) end
  if p.partial then tooltip:AddLine('Partial history: player absent from snapshot.',1,.8,.4) end
+ alignColumns(tooltip,aligned)
  tooltip:Show()
 end
 local function scoreLabel(row,name,realm,anchor,x,y)
@@ -312,7 +458,7 @@ local function scoreLabel(row,name,realm,anchor,x,y)
  end
  row.lkhScore:ClearAllPoints();row.lkhScore:SetPoint('TOPRIGHT',anchor or row,'TOPRIGHT',x or -8,y or -5)
  local p=name and H:PlayerScore(name,realm);H:PrepareScoreTooltip(p);row.lkhPlayerName=name;row.lkhPlayerRealm=realm;row.lkhScore:SetText(name and H:FormatScore(p and p.score) or '')
- row.lkhScore:SetTextColor(H:ScoreColor());row.lkhScore:Show()
+ row.lkhScore:SetTextColor(H:ScoreColor(p and p.score));row.lkhScore:Show()
 end
 local function friendName(row)
  if row.buttonType==FRIENDS_BUTTON_TYPE_WOW then local name=GetFriendInfo(row.id);return name end
@@ -325,12 +471,19 @@ local function friendName(row)
 end
 function H:InstallScoreHooks()
  self.scoreHooks=self.scoreHooks or {}
+ -- Blizzard covers the applicant list for group members who are not the leader, which also
+ -- blocks the mouse; let the mouse through so everyone can hover applicants.
+ local cover=LFGListFrame and LFGListFrame.ApplicationViewer and LFGListFrame.ApplicationViewer.UnempoweredCover
+ if cover and not self.scoreHooks.unempoweredCover then
+  self.scoreHooks.unempoweredCover=true
+  cover:EnableMouse(false);if cover.EnableMouseWheel then cover:EnableMouseWheel(false) end
+ end
  -- Player tooltip (mouseover in the world, nameplates, raid frames): keep the game's lines and
  -- add the LKH score below them.
  if GameTooltip and GameTooltip.HookScript and not self.scoreHooks.unitTooltip then
   self.scoreHooks.unitTooltip=true
   GameTooltip:HookScript('OnTooltipSetUnit',function(tooltip)
-   if not H.settings.hoverUnit then return end
+   if not H.settings.hoverUnit or not H:HoverModifierHeld() then return end
    local _,unit=tooltip:GetUnit()
    if unit and UnitIsPlayer(unit) then local name,realm=UnitName(unit);H:AddScoreTooltip(tooltip,name,realm) end
   end)
@@ -352,62 +505,129 @@ function H:InstallScoreHooks()
   local name=C_LFGList.GetApplicantMemberInfo(appID,memberIdx)
   row.lkhPlayerName=name
   local _,activity=C_LFGList.GetActiveEntryInfo();row.lkhActivity=activity
-  if not H.settings.scoreApplicants then if row.lkhScore then row.lkhScore:Hide() end;return end
+  -- The row's OnEnter is bound to Blizzard's function when the frame is created, so hooking the
+  -- global function does nothing; hook the row's own script instead.
+  if not row.lkhHover then
+   row.lkhHover=true
+   row:HookScript('OnEnter',function(s)
+    if not H.settings.hoverApplicants or not GameTooltip:IsOwned(s) then return end
+    -- Beside the list, like the search results tooltip, instead of over the applicants.
+    local applicant=s:GetParent()
+    if applicant then GameTooltip:ClearAllPoints();GameTooltip:SetPoint('BOTTOMLEFT',applicant,'TOPRIGHT',28,0) end
+    local n=s.lkhPlayerName or C_LFGList.GetApplicantMemberInfo(s:GetParent().applicantID,s.memberIdx)
+    H:AddScoreTooltip(GameTooltip,n,nil,H:TooltipDungeon(s.lkhActivity));H:OpaqueTooltip(GameTooltip)
+   end)
+  end
+  H:LayoutApplicantColumns()
+  if not H.settings.scoreApplicants then
+   if row.lkhScore then row.lkhScore:Hide() end
+   -- Blizzard's role icons again: 18px from x=104.
+   if row.lkhRoles then
+    row.lkhRoles=nil
+    for i=1,3 do local icon=row['RoleIcon'..i];if icon then icon:SetSize(18,18) end end
+    if row.RoleIcon1 then row.RoleIcon1:ClearAllPoints();row.RoleIcon1:SetPoint('LEFT',104,0) end
+   end
+   return
+  end
   -- Keep the 20px row height and leave role controls/item level in place.
-  row.Name:SetWidth(61)
+  -- The score sits in its own "IO" column, centred and on the same line as the name.
+  -- Role icons shrink to 14px so the Role column gives the name ROLE_TRIM more room; three
+  -- icons (tank, healer and damage) still fit.
+  row.Name:SetWidth(58+ROLE_TRIM)
+  row.lkhRoles=true
+  for i=1,3 do local icon=row['RoleIcon'..i];if icon then icon:SetSize(14,14) end end
+  if row.RoleIcon1 then row.RoleIcon1:ClearAllPoints();row.RoleIcon1:SetPoint('LEFT',104+ROLE_TRIM,0) end
   scoreLabel(row,name,nil,row,0,-5)
-  local _,activity=C_LFGList.GetActiveEntryInfo();row.lkhActivity=activity
-  row.lkhScore:ClearAllPoints();row.lkhScore:SetPoint('TOPLEFT',row,'TOPLEFT',70,-5);row.lkhScore:SetFont(H:FontPath(),9,'')
+  local font,size,flags=row.Name:GetFont()
+  if font then row.lkhScore:SetFont(font,size,flags) end
+  row.lkhScore:ClearAllPoints();row.lkhScore:SetPoint('CENTER',row,'LEFT',84+ROLE_TRIM,-1);row.lkhScore:SetJustifyH('CENTER')
+  local p=name and H:PlayerScore(name);row.lkhScore:SetText(H:FormatScore(p and p.score,true))
   if row.FriendIcon then row.FriendIcon:ClearAllPoints();row.FriendIcon:SetPoint('RIGHT',row,'LEFT',5,0) end
  end)
- hook('LFGListApplicantMember_OnEnter',function(row)
-  if not H.settings.hoverApplicants then return end
-  local name=row.lkhPlayerName or C_LFGList.GetApplicantMemberInfo(row:GetParent().applicantID,row.memberIdx);local activity=row.lkhActivity;H:AddScoreTooltip(GameTooltip,name,nil,H:TooltipDungeon(activity))
- end)
  hook('LFGListSearchEntry_Update',function(row)
-  if not H.settings.scoreSearch then return end
-  local _,_,_,hex=H:ScoreColor()
-  local name=select(13,C_LFGList.GetSearchResultInfo(row.resultID));local p=name and H:PlayerScore(name)
-  -- Search rows show the group title, so identify the leader alongside their score.
-  if name and row.ActivityName then row.ActivityName:SetText(name..' '..hex..H:FormatScore(p and p.score)..'|r') end
+  if not row.Name or not row.ActivityName then return end
+  local info={C_LFGList.GetSearchResultInfo(row.resultID)}
+  local activityName=C_LFGList.GetActivityInfo and C_LFGList.GetActivityInfo(info[2])
+  local dungeonID=H:TooltipDungeon(info[2]);local dungeon
+  for _,d in ipairs((LegionKeyHistoryLeaderboard or {}).dungeons or {}) do if d.id==dungeonID then dungeon=d end end
+  -- Blizzard sets the dungeon line to the room the row has for text (less beside voice chat).
+  H:FormatSearchRow(row.Name,row.ActivityName,info[3],activityName,dungeon and dungeon.short,info[13],row.ActivityName:GetWidth() or 176,info[12])
  end)
  hook('LFGListUtil_SetSearchEntryTooltip',function(tooltip,id)
   if not H.settings.hoverSearch then return end
-  local name=select(13,C_LFGList.GetSearchResultInfo(id));local _,activity=C_LFGList.GetSearchResultInfo(id);H:AddScoreTooltip(tooltip,name,nil,H:TooltipDungeon(activity))
+  local name=select(13,C_LFGList.GetSearchResultInfo(id));local _,activity=C_LFGList.GetSearchResultInfo(id);H:AddScoreTooltip(tooltip,name,nil,H:TooltipDungeon(activity));H:OpaqueTooltip(tooltip)
  end)
 end
-function H:ShowTargetScore(frame)
- if not UnitIsPlayer('target') or not self.settings.scoreTarget then
-  if self.targetScoreTooltip then self.targetScoreTooltip:Hide() end
+-- True when the player tooltip may show the score: always, or while the chosen key is held.
+-- Group finder tooltips sit over the Personal Bests panel, so they get a solid background.
+-- Tooltip skins such as ElvUI make tooltips see-through and set that again whenever one opens;
+-- the solid background is put back after them and the skin's own value returns afterwards.
+local function applyOpaque(tooltip)
+ if not tooltip.lkhOpaque then return end
+ local r,g,b,a=tooltip:GetBackdropColor()
+ if r and a and a<1 then tooltip.lkhSkinAlpha=tooltip.lkhSkinAlpha or a;tooltip:SetBackdropColor(r,g,b,1) end
+end
+local function restoreOpaque(tooltip)
+ tooltip.lkhOpaque=nil
+ if tooltip.lkhSkinAlpha then
+  local r,g,b=tooltip:GetBackdropColor()
+  if r then tooltip:SetBackdropColor(r,g,b,tooltip.lkhSkinAlpha) end
+  tooltip.lkhSkinAlpha=nil
+ end
+end
+function H:OpaqueTooltip(tooltip)
+ if not tooltip or not tooltip.GetBackdropColor or not tooltip.HookScript then return end
+ if not tooltip.lkhOpaqueHooks then
+  tooltip.lkhOpaqueHooks=true
+  tooltip:HookScript('OnShow',applyOpaque);tooltip:HookScript('OnUpdate',applyOpaque)
+  tooltip:HookScript('OnTooltipCleared',restoreOpaque);tooltip:HookScript('OnHide',restoreOpaque)
+ end
+ tooltip.lkhOpaque=true;applyOpaque(tooltip)
+end
+-- Applicant list headers: Name | IO | Role | iLvl. The Name header gives up the room for IO.
+-- Done when the list updates, after skins such as ElvUI have placed Blizzard's headers.
+function H:LayoutApplicantColumns()
+ local viewer=LFGListFrame and LFGListFrame.ApplicationViewer
+ if not viewer or not viewer.NameColumnHeader or not viewer.RoleColumnHeader then return end
+ local name,role=viewer.NameColumnHeader,viewer.RoleColumnHeader
+ local show=self.settings.scoreApplicants
+ if not viewer.lkhIOHeader then
+  if not show then return end
+  local io=CreateFrame('Button',nil,viewer,'LFGListColumnHeaderTemplate');viewer.lkhIOHeader=io
+  io:SetText('IO');io:SetSize(34,24);io:EnableMouse(false)
+  -- ElvUI restyles Blizzard's headers; give this one the same look.
+  local E=ElvUI and ElvUI[1];local S=E and E.GetModule and E:GetModule('Skins',true)
+  if S and S.HandleButton then pcall(S.HandleButton,S,io,true);if io.Label and io.Label.FontTemplate then pcall(io.Label.FontTemplate,io.Label) end end
+  viewer.lkhNameWidth,viewer.lkhRoleWidth=name:GetWidth(),role:GetWidth()
+ end
+ local io=viewer.lkhIOHeader
+ local _,_,_,gap=role:GetPoint(1);gap=tonumber(gap) or 0
+ if show then
+  name:SetWidth(viewer.lkhNameWidth-34-gap+ROLE_TRIM);role:SetWidth(viewer.lkhRoleWidth-ROLE_TRIM)
+  io:ClearAllPoints();io:SetPoint('LEFT',name,'RIGHT',gap,0);io:Show()
+  role:ClearAllPoints();role:SetPoint('LEFT',io,'RIGHT',gap,0)
+ else
+  io:Hide();name:SetWidth(viewer.lkhNameWidth);role:SetWidth(viewer.lkhRoleWidth)
+  role:ClearAllPoints();role:SetPoint('LEFT',name,'RIGHT',gap,0)
+ end
+end
+function H:HoverModifierHeld()
+ local key=self.settings.hoverModifier
+ if key=='ctrl' then return IsControlKeyDown() elseif key=='alt' then return IsAltKeyDown() elseif key=='shift' then return IsShiftKeyDown() end
+ return true
+end
+local socialEvents=CreateFrame('Frame');socialEvents:RegisterEvent('PLAYER_LOGIN');socialEvents:RegisterEvent('ADDON_LOADED');socialEvents:RegisterEvent('PLAYER_ENTERING_WORLD');socialEvents:RegisterEvent('MODIFIER_STATE_CHANGED')
+socialEvents:SetScript('OnEvent',function(_,event)
+ if event=='MODIFIER_STATE_CHANGED' then
+  -- Pressing or releasing the key redraws the tooltip under the mouse, adding or removing the score.
+  if H.settings and H.settings.hoverUnit and H.settings.hoverModifier~='always' and GameTooltip:IsShown() then
+   local _,unit=GameTooltip:GetUnit()
+   if unit then GameTooltip:SetUnit(unit) end
+  end
   return
  end
- local name,realm=UnitName('target');if not name then return end
- if not self.targetScoreTooltip then
-  self.targetScoreTooltip=CreateFrame('GameTooltip','LKHUnitScoreTooltip',UIParent,'GameTooltipTemplate')
-  self.targetScoreTooltip:SetFrameStrata('TOOLTIP')
- end
- local tip=self.targetScoreTooltip
- tip:SetOwner(frame,'ANCHOR_BOTTOMRIGHT');tip:ClearLines();tip:SetText(name)
- self:AddScoreTooltip(tip,name,realm)
- GameTooltip:Hide()
-end
-function H:HookTargetScore()
- for _,frameName in ipairs({'ElvUF_Target','TargetFrame'}) do
-  local frame=_G[frameName]
-  if frame and not frame.lkhTargetHover then
-   frame.lkhTargetHover=true
-   frame:HookScript('OnEnter',function(s) H.hoveredTargetFrame=s;H:ShowTargetScore(s) end)
-   frame:HookScript('OnLeave',function() H.hoveredTargetFrame=nil;if H.targetScoreTooltip then H.targetScoreTooltip:Hide() end end)
-   frame:HookScript('OnHide',function() H.hoveredTargetFrame=nil;if H.targetScoreTooltip then H.targetScoreTooltip:Hide() end end)
-  end
- end
-end
-local socialEvents=CreateFrame('Frame');socialEvents:RegisterEvent('PLAYER_LOGIN');socialEvents:RegisterEvent('ADDON_LOADED');socialEvents:RegisterEvent('PLAYER_ENTERING_WORLD');socialEvents:RegisterEvent('PLAYER_TARGET_CHANGED')
--- Only explicit target-frame, friends and group-finder hovers request scores.
-socialEvents:SetScript('OnEvent',function(_,event)
- H:InstallScoreHooks();H:HookTargetScore()
- if event=='PLAYER_LOGIN' then H:PlayerScore(UnitName('player')) end
- if event=='PLAYER_TARGET_CHANGED' and H.hoveredTargetFrame then H:ShowTargetScore(H.hoveredTargetFrame) end
+ H:InstallScoreHooks()
+ if event=='PLAYER_LOGIN' then H:PlayerScore(UnitName('player'));C_Timer.After(6,function() H:AutoImportSnapshot() end) end
 end)
 local labels={'Warrior','Paladin','Hunter','Rogue','Priest','Death Knight','Shaman','Mage','Warlock','Monk','Druid','Demon Hunter'}
 local realms={'All realms','Evermoon','Tauri','WoD'}

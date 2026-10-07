@@ -219,7 +219,12 @@ function H:RefreshHUD()
   end
  end
  self.hud:SetHeight(144+visibleRows*37)
- self.hud:SetShown(self.settings.hud and PVEFrame and PVEFrame:IsShown() or false)
+ -- While a Personal Bests option is pointed at in the settings, the panel shows beside them.
+ local options=self.hudPreview and InterfaceOptionsFrame
+ self.hud:ClearAllPoints()
+ if options then self.hud:SetPoint('TOPLEFT',options,'TOPRIGHT',6,0);self.hud:SetFrameStrata('DIALOG')
+ else self.hud:SetFrameStrata('MEDIUM');if PVEFrame then self.hud:SetPoint('TOPLEFT',PVEFrame,'TOPRIGHT',8,0) end end
+ self.hud:SetShown(options and true or (self.settings.hud and PVEFrame and PVEFrame:IsShown()) or false)
 end
 local function icon(parent,texture,size,x,y)
  local t=parent:CreateTexture(nil,'ARTWORK');t:SetSize(size,size);t:SetPoint('TOPLEFT',x,y);t:SetTexture(texture);t:SetTexCoord(.08,.92,.08,.92);return t
@@ -296,7 +301,7 @@ function H:CreateUI()
  button(f,'<',30,943,-528,function() H.page=math.max(1,(H.page or 1)-1);H:Refresh() end)
  button(f,'>',30,976,-528,function() H.page=(H.page or 1)+1;H:Refresh() end)
  f:EnableMouseWheel(true);f:SetScript('OnMouseWheel',function(_,delta) H.page=math.max(1,(H.page or 1)-delta);H:Refresh() end)
- local hud=CreateFrame('Frame','LegionKeyHistoryHUD',UIParent);self.hud=hud;hud:SetSize(424,590);hud:SetFrameStrata('DIALOG');hud:SetBackdrop(bg);hud:SetBackdropColor(.025,.035,.05,1);hud:SetBackdropBorderColor(.17,.30,.34);hud:SetClampedToScreen(true);hud:Hide()
+ local hud=CreateFrame('Frame','LegionKeyHistoryHUD',UIParent);self.hud=hud;hud:SetSize(424,590);hud:SetFrameStrata('MEDIUM');hud:SetBackdrop(bg);hud:SetBackdropColor(.025,.035,.05,1);hud:SetBackdropBorderColor(.17,.30,.34);hud:SetClampedToScreen(true);hud:Hide()
  hud:EnableMouse(true);hud:HookScript('OnMouseDown',function() H:Front(hud) end)
  text(hud,17,14,-15,'|cff4adbc8PERSONAL BESTS|r');self.hudModeLabel=text(hud,10,14,-40)
  text(hud,9,14,-62,'TOTAL IO')
