@@ -321,6 +321,12 @@ function H:TooltipDungeon(activityID)
  if type(activity)~='string' then return end
  for _,d in ipairs((LegionKeyHistoryLeaderboard or {}).dungeons or {}) do if activity:lower():find(d.name:lower(),1,true) then return d.id end end
 end
+-- A best run that went over the dungeon's timer (j-th dungeon of the file): shown in grey.
+function H:OverTime(j,b)
+ local timer=self:DungeonTimer(j)
+ return b~=nil and timer~=nil and timer>0 and b[3]>timer
+end
+local function grey(text,on) return on and ('|cff7a7a7a'..text..'|r') or text end
 function H:PrepareScoreTooltip(p)
  if not p or p.tooltipRows then return end
  self.tooltipCacheQueue=self.tooltipCacheQueue or {}
@@ -328,9 +334,9 @@ function H:PrepareScoreTooltip(p)
  queue[#queue+1]=p
  if #queue>128 then local old=table.remove(queue,1);old.tooltipRows=nil end
  p.tooltipRows={}
- for _,d in ipairs((LegionKeyHistoryLeaderboard or {}).dungeons or {}) do
+ for j,d in ipairs((LegionKeyHistoryLeaderboard or {}).dungeons or {}) do
   local b=p.best[d.id]
-  p.tooltipRows[d.id]=b and string.format('+%d  %s  |  %.1f IO',b[2],self:Clock(b[3]),b[1]) or '-'
+  p.tooltipRows[d.id]=b and grey(string.format('+%d  %s  |  %.1f IO',b[2],self:Clock(b[3]),b[1]),self:OverTime(j,b)) or '-'
  end
 end
 -- Tooltip rows whose right side is split into columns (key, time, score) that line up from row
@@ -429,10 +435,10 @@ function H:AddScoreTooltip(tooltip,name,realm,selected)
  local dungeons=(LegionKeyHistoryLeaderboard or {}).dungeons or {}
  if self.settings.tipDungeons then
   tooltip:AddLine(' ')
-  for _,d in ipairs(dungeons) do
-   tooltip:AddDoubleLine((d.id==selected and '|cff4dff80> ' or '')..d.short..(d.id==selected and '|r' or ''),p.tooltipRows[d.id],.8,.85,.9,1,1,1)
-   local b=p.best[d.id]
-   if b then aligned[#aligned+1]={line=tooltip:NumLines(),parts={'+'..b[2],self:Clock(b[3]),'|',string.format('%.1f IO',b[1])}} end
+  for j,d in ipairs(dungeons) do
+   local b=p.best[d.id];local late=self:OverTime(j,b);local l=late and .48 or .8
+   tooltip:AddDoubleLine((d.id==selected and '|cff4dff80> ' or '')..d.short..(d.id==selected and '|r' or ''),p.tooltipRows[d.id],l,late and .48 or .85,late and .48 or .9,1,1,1)
+   if b then aligned[#aligned+1]={line=tooltip:NumLines(),parts={grey('+'..b[2],late),grey(self:Clock(b[3]),late),late and '|cff7a7a7a|||r' or '|',grey(string.format('%.1f IO',b[1]),late)}} end
   end
  end
  -- Best Fortified / Tyrannical key per dungeon; grey when that run was over time.
@@ -968,8 +974,8 @@ function H:CreateLeaderboard()
    GameTooltip:SetOwner(s,'ANCHOR_LEFT');GameTooltip:SetText(p.name..' - '..p.realm)
    GameTooltip:AddLine(string.format('%.1f points | Rank %d',p.score,p.spec and p.rank or H:PlayerRank(p) or p.rank),1,.82,0)
    if p.spec then GameTooltip:AddLine(p.spec..' runs only',.29,.86,.78) end
-   for _,d in ipairs(data.dungeons or {}) do local b=p.best[d.id]
-    GameTooltip:AddDoubleLine(d.name,b and string.format('+%d  %s  |  %.1f',b[2],H:Clock(b[3]),b[1]) or '-',.85,.9,.93,1,1,1)
+   for j,d in ipairs(data.dungeons or {}) do local b=p.best[d.id];local late=H:OverTime(j,b)
+    GameTooltip:AddDoubleLine(grey(d.name,late),b and grey(string.format('+%d  %s  |  %.1f',b[2],H:Clock(b[3]),b[1]),late) or '-',.85,.9,.93,1,1,1)
    end
    GameTooltip:Show()
   end);row:SetScript('OnLeave',function() GameTooltip:Hide() end)
