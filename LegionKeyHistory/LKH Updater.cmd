@@ -2,13 +2,11 @@
 rem Legion Key History - updater.
 rem Keeps LeaderboardData.lua up to date with an hourly Windows scheduled task, and can
 rem install new addon versions. Double-click for the menu, or run with:
-rem   install / update / addon / uninstall / fixpermission
+rem   install / update / addon / uninstall
 setlocal
 cd /d "%~dp0"
 set "TASK=LKH Leaderboard Update"
 if defined LKH_TASK set "TASK=%LKH_TASK%"
-set "ADDON=%~dp0"
-set "ADDON=%ADDON:~0,-1%"
 
 if not exist "%~dp0LegionKeyHistory.toc" (
   echo This file must stay inside the LegionKeyHistory addon folder:
@@ -21,7 +19,6 @@ if /i "%~1"=="install" goto install
 if /i "%~1"=="update" goto update
 if /i "%~1"=="addon" goto addon
 if /i "%~1"=="uninstall" goto uninstall
-if /i "%~1"=="fixpermission" goto fixpermission
 
 :menu
 cls
@@ -29,7 +26,7 @@ echo  Legion Key History - updater
 echo  ============================
 echo.
 schtasks /Query /TN "%TASK%" >nul 2>&1 && (echo  Hourly leaderboard update: INSTALLED) || (echo  Hourly leaderboard update: not installed)
-call :writable || (echo  Note: Windows protects this folder - choose 1 or 2 and it will offer a fix.)
+call :writable || (echo  Note: Windows protects this folder - close this and run it as administrator.)
 echo.
 echo   1. Install the hourly leaderboard update
 echo   2. Update the leaderboard now
@@ -103,23 +100,6 @@ call :writable && exit /b 0
 echo WoW is installed in a folder Windows protects (for example Program Files), so
 echo the updater cannot change the addon files.
 echo.
-echo It can fix this once: your Windows user gets permission to change THIS addon
-echo folder only. Windows will ask for administrator approval.
-echo.
-choice /C YN /M "Fix it now"
-if errorlevel 2 (
-  echo.
-  echo Not changed. You can also move WoW out of Program Files, or run this file as administrator.
-  exit /b 1
-)
-call :fixpermission
-call :writable && (echo Fixed. & echo. & exit /b 0)
-echo Still not writable. Try running this file as administrator ^(right-click, Run as administrator^).
+echo Close this window, then right-click "LKH Updater.cmd" and choose
+echo "Run as administrator". You can also move WoW out of Program Files.
 exit /b 1
-
-:fixpermission
-set "FIX=%TEMP%\lkh-fix-permission.cmd"
-> "%FIX%" echo @icacls "%ADDON%" /grant "%USERDOMAIN%\%USERNAME%:(OI)(CI)M" /T /Q
-powershell -NoProfile -Command "Start-Process -FilePath $env:FIX -Verb RunAs -Wait -WindowStyle Hidden" 2>nul
-del "%FIX%" >nul 2>&1
-exit /b 0

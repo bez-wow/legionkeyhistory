@@ -94,7 +94,7 @@ function Update-Addon {
 }
 
 if (-not (Writable)) {
-    Log "Cannot write to $PSScriptRoot (Windows protects this folder). Run LKH Updater.cmd and let it fix the folder permission."
+    Log "Cannot write to $PSScriptRoot (Windows protects this folder). Right-click LKH Updater.cmd and choose Run as administrator."
     if ($Pause) { Read-Host 'Press Enter to close' | Out-Null }
     exit 3
 }
