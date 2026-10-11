@@ -397,6 +397,18 @@ local function alignColumns(tooltip,rows)
   end
  end
 end
+-- One line instead of the whole block: for the world tooltip inside instances, where it would
+-- cover the timer and the rest of the screen every time the mouse passes over a player.
+function H:AddCompactScore(tooltip,name,realm)
+ if not name then return end
+ local p=self:PlayerScore(name,realm)
+ if not p then return end
+ local sr,sg,sb=1,.82,0
+ if self.settings.scoreColorMode~='custom' then sr,sg,sb=self:ScoreColor(p.score) end
+ local rank=self.settings.tipRanks and self:PlayerRank(p)
+ tooltip:AddDoubleLine('LKH score',string.format('%.1f',p.score)..(rank and ('  |cffffd100#'..rank..'|r') or ''),.29,.86,.78,sr,sg,sb)
+ tooltip:Show()
+end
 function H:AddScoreTooltip(tooltip,name,realm,selected)
  if not name then return end
  local aligned={}
@@ -524,7 +536,10 @@ function H:InstallScoreHooks()
   GameTooltip:HookScript('OnTooltipSetUnit',function(tooltip)
    if not H.settings.hoverUnit or not H:HoverModifierHeld() then return end
    local _,unit=tooltip:GetUnit()
-   if unit and UnitIsPlayer(unit) then local name,realm=UnitName(unit);H:AddScoreTooltip(tooltip,name,realm) end
+   if unit and UnitIsPlayer(unit) then
+    local name,realm=UnitName(unit)
+    if IsInInstance and IsInInstance() then H:AddCompactScore(tooltip,name,realm) else H:AddScoreTooltip(tooltip,name,realm) end
+   end
   end)
  end
  local function hook(name,fn) if type(_G[name])=='function' and not self.scoreHooks[name] then hooksecurefunc(name,fn);self.scoreHooks[name]=true end end
