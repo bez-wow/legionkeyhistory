@@ -5,19 +5,19 @@ local H=LegionKeyHistory
 H.defaultSettings={
  minimapHidden=false,minimapAngle=220,
  -- Personal Bests
- hud=true,bestMode='timed',hudOverall=true,hudSpec=true,hudClass=true,hudRole=true,
+ hud=false,bestMode='timed',hudOverall=true,hudSpec=true,hudClass=true,hudRole=true,
  -- Scores in the game's own windows: next to the name, and details on hover
  scoreFriends=true,hoverFriends=true,scoreApplicants=true,hoverApplicants=true,hoverSearch=true,hoverUnit=true,
  -- Group finder search rows: 'leaderTop', 'dungeonTop' or 'plain' (see FormatSearchRow)
  searchStyle='leaderTop',hoverModifier='always',
  -- Score colour: 'custom' (scoreColor) or 'rio' (Raider.IO-style gradient)
- scoreDecimals=false,scoreSuffix=true,scoreColor='4adbc8',scoreColorMode='custom',
+ scoreDecimals=false,scoreSuffix=false,scoreColor='4adbc8',scoreColorMode='rio',
  -- Score tooltip
- tipRanks=true,tipBestRun=true,tipDungeons=true,tipWeekSplit=false,
+ tipRanks=true,tipBestRun=true,tipTimedRuns=true,tipDungeons=true,tipWeekSplit=true,
  -- Sync: 'ask' every time, accept anyone in the 'party', or 'never'
  syncMode='ask',syncAutoTrusted=false,
  -- Journal (not on the settings page)
- showLaterDungeons=false,dayChart='line',
+ showLaterDungeons=false,dayChart='bar',
  -- Font of the addon's windows: 'auto' (Expressway when installed, else Arial Narrow) or a font name
  font='auto'
 }
@@ -703,8 +703,9 @@ function H:CreateSettingsPanel()
  note('Point at an option to see your own tooltip beside this window.')
  check('Overall, spec and class rank','tipRanks','tooltip')
  check('Best run','tipBestRun','tooltip')
+ check('Timed +10-14, +15-19 and +20+ runs','tipTimedRuns','tooltip')
  check('Best key per dungeon','tipDungeons','tooltip')
- check('Best Fortified / Tyrannical key per dungeon','tipWeekSplit','tooltip')
+ check('Best Fortified / Tyrannical key per dungeon (instead of time and score)','tipWeekSplit','tooltip')
 
  heading('Personal Bests')
  note('Point at an option to see the panel beside this window.')

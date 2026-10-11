@@ -327,6 +327,12 @@ function H:OverTime(j,b)
  return b~=nil and timer~=nil and timer>0 and b[3]>timer
 end
 local function grey(text,on) return on and ('|cff7a7a7a'..text..'|r') or text end
+-- A key with one gold "+" per chest, like Raider.IO's "++10": the pluses sit in front, so the
+-- levels stay right-aligned in their column. Grey with a single "+" when it was over time.
+local function starKey(level,upgrades,late)
+ if late then return grey('+'..level,true) end
+ return '|cffffc400'..string.rep('+',math.max(1,upgrades or 0))..'|r'..level
+end
 function H:PrepareScoreTooltip(p)
  if not p or p.tooltipRows then return end
  self.tooltipCacheQueue=self.tooltipCacheQueue or {}
@@ -336,7 +342,8 @@ function H:PrepareScoreTooltip(p)
  p.tooltipRows={}
  for j,d in ipairs((LegionKeyHistoryLeaderboard or {}).dungeons or {}) do
   local b=p.best[d.id]
-  p.tooltipRows[d.id]=b and grey(string.format('+%d  %s  |  %.1f IO',b[2],self:Clock(b[3]),b[1]),self:OverTime(j,b)) or '-'
+  local late=self:OverTime(j,b)
+  p.tooltipRows[d.id]=b and (starKey(b[2],self:KeyUpgrades(b[3],self:DungeonTimer(j)),late)..grey(string.format('  %s  |  %.1f IO',self:Clock(b[3]),b[1]),late)) or '-'
  end
 end
 -- Tooltip rows whose right side is split into columns (key, time, score) that line up from row
@@ -368,7 +375,11 @@ local function alignColumns(tooltip,rows)
    if w>(widths[c] or -1) then widths[c],widest[c]=w,part end
   end
  end
- local placeholder=table.concat(widest,'  ')
+ -- The placeholder is invisible (alpha 0), but icons in a font string ignore its alpha: an icon
+ -- column is held open with digits of the same width instead.
+ local held={}
+ for c,part in ipairs(widest) do held[c]=part:find('|T',1,true) and string.rep('0',math.ceil(widths[c]/math.max(1,measureWidth('0')))) or part end
+ local placeholder=table.concat(held,'  ')
  tooltip.lkhCols=tooltip.lkhCols or {};tooltip.lkhAligned=tooltip.lkhAligned or {}
  for _,row in ipairs(rows) do
   local right=_G[name..'TextRight'..row.line]
@@ -432,25 +443,45 @@ function H:AddScoreTooltip(tooltip,name,realm,selected)
   end
   if d.id==selected and bestID~=selected then local b=p.best[d.id];tooltip:AddDoubleLine('Best for dungeon',d.short..(b and (' +'..b[2]) or ' --'),.3,1,.5,.3,1,.5) end
  end
- local dungeons=(LegionKeyHistoryLeaderboard or {}).dungeons or {}
- if self.settings.tipDungeons then
-  tooltip:AddLine(' ')
-  for j,d in ipairs(dungeons) do
-   local b=p.best[d.id];local late=self:OverTime(j,b);local l=late and .48 or .8
-   tooltip:AddDoubleLine((d.id==selected and '|cff4dff80> ' or '')..d.short..(d.id==selected and '|r' or ''),p.tooltipRows[d.id],l,late and .48 or .85,late and .48 or .9,1,1,1)
-   if b then aligned[#aligned+1]={line=tooltip:NumLines(),parts={grey('+'..b[2],late),grey(self:Clock(b[3]),late),late and '|cff7a7a7a|||r' or '|',grey(string.format('%.1f IO',b[1]),late)}} end
-  end
+ -- Timed keys by level range, like Raider.IO's "Timed +10-14 Runs".
+ if self.settings.tipTimedRuns and not p.partial then
+  local counts=self:TimedCounts(p)
+  tooltip:AddDoubleLine('Timed +10-14 runs',counts.low,.8,.85,.9,1,1,1)
+  tooltip:AddDoubleLine('Timed +15-19 runs',counts.high,.8,.85,.9,1,1,1)
+  tooltip:AddDoubleLine('Timed +20+ runs',counts.top,.8,.85,.9,1,1,1)
  end
- -- Best Fortified / Tyrannical key per dungeon; grey when that run was over time.
+ local dungeons=(LegionKeyHistoryLeaderboard or {}).dungeons or {}
+ local function dungeonName(d) return (d.id==selected and '|cff4dff80> ' or '')..d.short..(d.id==selected and '|r' or '') end
+ -- Best Fortified / Tyrannical key per dungeon, in place of the best key with its time and score.
  if self.settings.tipWeekSplit and p.weekBest and next(p.weekBest) then
-  local function level(value) if not value then return '|cff666666--|r' end;return value>0 and ('+'..value) or ('|cff888888+'..(-value)..'|r') end
-  tooltip:AddLine(' ');tooltip:AddDoubleLine('Fortified / Tyrannical',' ',.29,.86,.78,1,1,1)
-  for _,d in ipairs(dungeons) do
+  -- Column heads: the affix icons (the game's own when it has them, else the known textures).
+  local function icon(affix,fallback)
+   local texture=C_ChallengeMode and C_ChallengeMode.GetAffixInfo and select(3,C_ChallengeMode.GetAffixInfo(affix))
+   return '|T'..(texture or fallback)..':14:14:0:0|t'
+  end
+  local fort,tyr=icon(10,'Interface\\Icons\\ability_toughness'),icon(9,'Interface\\Icons\\achievement_boss_archaedas')
+  tooltip:AddLine(' ');tooltip:AddDoubleLine('Best Runs by Dungeon',fort..'  '..tyr,.29,.86,.78,1,1,1)
+  aligned[#aligned+1]={line=tooltip:NumLines(),parts={fort,tyr}}
+  local ups=self:WeekUpgrades(p)
+  for j,d in ipairs(dungeons) do
    local w=p.weekBest[d.id]
    if w then
-    tooltip:AddDoubleLine(d.short,level(w.fort)..'  /  '..level(w.tyr),.8,.85,.9,1,1,1)
-    aligned[#aligned+1]={line=tooltip:NumLines(),parts={level(w.fort),'/',level(w.tyr)}}
+    -- Stars come from the history run of that level; the file's field has the level only.
+    local function level(value,week)
+     if not value then return '|cff666666--|r' end
+     local run=ups[j] and ups[j][week];local up=run and run.level==math.abs(value) and run.upgrades or 0
+     return starKey(math.abs(value),up,value<0)
+    end
+    tooltip:AddDoubleLine(dungeonName(d),level(w.fort,'fort')..'  '..level(w.tyr,'tyr'),.8,.85,.9,1,1,1)
+    aligned[#aligned+1]={line=tooltip:NumLines(),parts={level(w.fort,'fort'),level(w.tyr,'tyr')}}
    end
+  end
+ elseif self.settings.tipDungeons then
+  tooltip:AddLine(' ');tooltip:AddLine('Best Runs by Dungeon',.29,.86,.78)
+  for j,d in ipairs(dungeons) do
+   local b=p.best[d.id];local late=self:OverTime(j,b);local l=late and .48 or .8
+   tooltip:AddDoubleLine(dungeonName(d),p.tooltipRows[d.id],l,late and .48 or .85,late and .48 or .9,1,1,1)
+   if b then aligned[#aligned+1]={line=tooltip:NumLines(),parts={starKey(b[2],self:KeyUpgrades(b[3],self:DungeonTimer(j)),late),grey(self:Clock(b[3]),late),late and '|cff7a7a7a|||r' or '|',grey(string.format('%.1f IO',b[1]),late)}} end
   end
  end
  if p.localUpdated then tooltip:AddLine('Includes locally recorded party runs.',.29,.86,.78) end
@@ -1053,6 +1084,85 @@ local function historyRun(data,line)
  for a in aff:gmatch('%d+') do run.affixes[#run.affixes+1]=tonumber(a) end
  for r,s in party:gmatch('(%d+):?(%d*)') do run.members[#run.members+1]={row=tonumber(r),spec=data.specs and data.specs[tonumber(s) or 0]} end
  return run
+end
+-- 'fort' or 'tyr' for a history run. Keys below +10 lack that affix and take it from their week:
+-- the weeks are the stretches in which +10 runs share one affix set (learnt once per file). A
+-- run between two weeks goes to the earlier one when its affixes start that week's set, else to
+-- the next one, like the file's own Fortified / Tyrannical field.
+local function weekType(data,stamp,aff)
+ local function typeOf(set) return set:find('%f[%d]10%f[%D]') and 'fort' or set:find('%f[%d]9%f[%D]') and 'tyr' or nil end
+ if aff:match('^%d+,%d+,%d+$') then return typeOf(aff) end
+ local weeks=data.weekSegments
+ if not weeks then
+  local full={}
+  for t,set in data.historyText:gmatch('|(%d+)|(%d+,%d+,%d+)|') do full[#full+1]={tonumber(t),set} end
+  table.sort(full,function(a,b) return a[1]<b[1] end)
+  weeks={}
+  for _,r in ipairs(full) do
+   local last=weeks[#weeks]
+   if last and last.set==r[2] then last.last=r[1] else weeks[#weeks+1]={set=r[2],first=r[1],last=r[1]} end
+  end
+  data.weekSegments=weeks
+ end
+ for i,w in ipairs(weeks) do
+  if stamp<=w.last then
+   local before=weeks[i-1]
+   if stamp<w.first and before and aff~='' and before.set:sub(1,#aff+1)==aff..',' and w.set:sub(1,#aff+1)~=aff..',' then return typeOf(before.set) end
+   return typeOf(w.set)
+  end
+ end
+ return weeks[#weeks] and typeOf(weeks[#weeks].set)
+end
+-- Calls fn(map,level,ms,stamp,aff) for each history run a player (PlayerScore record) was in.
+-- Only the lines naming the player are read: the party field is "row:spec,row:spec", so "|row:"
+-- or ",row:" finds them without walking every run.
+local function eachPlayerRun(p,fn)
+ local data=LegionKeyHistoryLeaderboard;local row=p.row or p.rank
+ local s=data and data.historyText;if not s or not row or p.partial then return end
+ for _,needle in ipairs({'|'..row..':',','..row..':'}) do
+  local init=1
+  while true do
+   local pos=s:find(needle,init,true);if not pos then break end
+   local from=math.max(1,pos-300);local before=s:sub(from,pos):match('.*()\n')
+   local stop=s:find('\n',pos,true)
+   local line=s:sub(before and from+before or 1,(stop or #s+1)-1);init=(stop or #s)+1
+   local map,level,ms,stamp,aff=historyFields(line)
+   if map then fn(tonumber(map),tonumber(level),tonumber(ms),tonumber(stamp),aff) end
+  end
+ end
+end
+-- Chests of a player's best Fortified and Tyrannical run per dungeon slot, from the file's run
+-- history (the file's Fortified / Tyrannical field holds only the key level).
+-- Result: [slot]={fort=run,tyr=run}, run={level,upgrades}.
+function H:WeekUpgrades(p)
+ if p.weekUpgrades then return p.weekUpgrades end
+ local result={};p.weekUpgrades=result
+ local data=LegionKeyHistoryLeaderboard
+ eachPlayerRun(p,function(slot,level,ms,stamp,aff)
+  local week=weekType(data,stamp,aff)
+  if not week then return end
+  local timer=(data.historyMaps[slot] or {}).timer
+  local seconds=ms/1000;local score=runScore(level,seconds,timer)
+  local runs=result[slot] or {};result[slot]=runs;local old=runs[week]
+  if not old or score>old.score or (score==old.score and seconds<old.seconds) then
+   runs[week]={score=score,seconds=seconds,level=level,upgrades=self:KeyUpgrades(seconds,timer)}
+  end
+ end)
+ return result
+end
+-- How many keys a player timed at +10 to +14, +15 to +19 and +20 and above, from the file's run history.
+function H:TimedCounts(p)
+ if p.timedCounts then return p.timedCounts end
+ local counts={low=0,high=0,top=0};p.timedCounts=counts
+ local data=LegionKeyHistoryLeaderboard
+ eachPlayerRun(p,function(slot,level,ms)
+  local timer=(data.historyMaps[slot] or {}).timer
+  if level>=10 and timer and ms<=timer*1000 then
+   local range=level>=20 and 'top' or level>=15 and 'high' or 'low'
+   counts[range]=counts[range]+1
+  end
+ end)
+ return counts
 end
 -- Every run in the file ranked by run score (best first; the earlier run wins a tie), for all
 -- dungeons (slot nil) or one. Entries are {line,score,stamp,rank}; runs are built per page.
