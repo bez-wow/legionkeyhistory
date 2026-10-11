@@ -17,7 +17,9 @@ H.defaultSettings={
  -- Sync: 'ask' every time, accept anyone in the 'party', or 'never'
  syncMode='ask',syncAutoTrusted=false,
  -- Journal (not on the settings page)
- showLaterDungeons=false,dayChart='line'
+ showLaterDungeons=false,dayChart='line',
+ -- Font of the addon's windows: 'auto' (Expressway when installed, else Arial Narrow) or a font name
+ font='auto'
 }
 local DEFAULT='Default'
 local SYNC_MODES={ask='Ask every time',party='Accept anyone in my party',never='Never'}
@@ -125,6 +127,7 @@ function H:ImportSettings(text)
   elseif key=='hoverModifier' and MODIFIERS[value] then target[key]=value;count=count+1
   elseif key=='scoreColorMode' and COLOR_MODES[value] then target[key]=value;count=count+1
   elseif key=='searchStyle' and SEARCH_STYLES[value] then target[key]=value;count=count+1
+  elseif key=='font' and value~='' then target[key]=value;count=count+1
   elseif key=='scoreColor' and value:match('^%x%x%x%x%x%x$') then target[key]=value:lower();count=count+1 end
  end
  self:ApplySettings()
@@ -134,6 +137,7 @@ end
 -- Puts every visible part of the addon in line with the current settings.
 function H:ApplySettings()
  if self.SetMinimapHidden then self:SetMinimapHidden(self.settings.minimapHidden) end
+ if self.ApplyFontEverywhere and self.settings.font~=self.appliedFont then self.appliedFont=self.settings.font;self:ApplyFontEverywhere() end
  if self.RefreshHUD then self:RefreshHUD() end
  if self.frame and self.frame:IsShown() and self.Refresh then self:Refresh() end
  if self.leaderboardFrame and self.leaderboardFrame:IsShown() and self.RefreshLeaderboard then self:RefreshLeaderboard() end
@@ -438,19 +442,21 @@ function H:CreateSettingsPreview(body,refreshers)
  -- is open. After a pick it stays ("sticky") so the result can be seen, until the mouse points at
  -- another control or leaves the settings window. With "Preview" ticked it always stays.
  local owner,sticky,pinned
+ -- A list an option opened: a dropdown, or the font list (which stays open while fonts are tried).
+ local function listOpen() return (DropDownList1 and DropDownList1:IsShown()) or (H.fontPicker and H.fontPicker:IsShown()) end
  local function hoverPreview(frame,k)
-  frame:HookScript('OnEnter',function() owner,sticky=frame,false;set(k) end)
-  frame:HookScript('OnLeave',function() if not pinned and not sticky and not (DropDownList1 and DropDownList1:IsShown()) then owner=nil;set(nil) end end)
+  frame:HookScript('OnEnter',function() if listOpen() and owner~=frame then return end;owner,sticky=frame,false;set(k) end)
+  frame:HookScript('OnLeave',function() if not pinned and not sticky and not listOpen() then owner=nil;set(nil) end end)
  end
- if DropDownList1 and DropDownList1.HookScript then
-  DropDownList1:HookScript('OnHide',function() if owner and kind then sticky=true end end)
- end
+ local function listClosed() if owner and kind then sticky=true end end
+ if DropDownList1 and DropDownList1.HookScript then DropDownList1:HookScript('OnHide',listClosed) end
+ H.SettingsListClosed=listClosed
  local scroll=body:GetParent();local panel=scroll and scroll:GetParent()
  local neutral={[body]=true}
  for _,f in ipairs({scroll,panel,InterfaceOptionsFrame,InterfaceOptionsFramePanelContainer}) do if f then neutral[f]=true end end
  local watch=CreateFrame('Frame',nil,panel or body)
  watch:SetScript('OnUpdate',function()
-  if pinned or not sticky or (DropDownList1 and DropDownList1:IsShown()) then return end
+  if pinned or not sticky or listOpen() then return end
   local focus=GetMouseFocus and GetMouseFocus()
   if focus==owner then sticky=false
   elseif focus and not neutral[focus] then sticky=false;owner=nil;set(nil) end
@@ -472,6 +478,7 @@ end
 
 local function menu(owner,items)
  if not H.settingsMenu then H.settingsMenu=CreateFrame('Frame','LKHSettingsMenu',UIParent,'UIDropDownMenuTemplate') end
+ if H.fontPicker then H.fontPicker:Hide() end
  EasyMenu(items,H.settingsMenu,owner,0,0,'MENU')
 end
 
@@ -482,6 +489,57 @@ local function confirm(text,onAccept)
  StaticPopup_Show('LKH_CONFIRM')
 end
 
+-- The Font setting's list: a short scrolling list under its button, each name in its own font.
+-- (A dropdown of every LibSharedMedia font runs off the screen.)
+local PICKER_ROWS=14
+local function fontPicker(owner)
+ local p=H.fontPicker
+ if not p then
+  p=CreateFrame('Frame','LKHFontPicker',UIParent);H.fontPicker=p
+  p:SetSize(260,PICKER_ROWS*20+12);p:SetFrameStrata('FULLSCREEN_DIALOG');p:SetClampedToScreen(true)
+  p:EnableMouse(true);p:EnableMouseWheel(true);p:Hide();tinsert(UISpecialFrames,'LKHFontPicker')
+  p:SetBackdrop({bgFile='Interface\\Buttons\\WHITE8X8',edgeFile='Interface\\Buttons\\WHITE8X8',edgeSize=1})
+  p:SetBackdropColor(.025,.035,.05,.97);p:SetBackdropBorderColor(.17,.30,.34)
+  p.offset=0
+  local bar=p:CreateTexture(nil,'ARTWORK');bar:SetColorTexture(.29,.86,.78,.6);bar:SetWidth(3);p.bar=bar
+  p.rows={}
+  for i=1,PICKER_ROWS do
+   local b=CreateFrame('Button',nil,p);b:SetSize(244,20);b:SetPoint('TOPLEFT',6,-6-(i-1)*20)
+   local hl=b:CreateTexture(nil,'HIGHLIGHT');hl:SetAllPoints();hl:SetColorTexture(1,1,1,.08)
+   b.label=b:CreateFontString(nil,'OVERLAY');b.label:SetPoint('LEFT',6,0);b.label:SetPoint('RIGHT',-6,0);b.label:SetJustifyH('LEFT')
+   -- Picking applies the font at once and keeps the list open, so several can be tried.
+   b:SetScript('OnClick',function(s) H.settings.font=s.name;H:ApplySettings();p:Refresh() end)
+   p.rows[i]=b
+  end
+  function p:Refresh()
+   local count=#self.names;self.offset=math.max(0,math.min(self.offset,count-PICKER_ROWS))
+   for i,b in ipairs(self.rows) do
+    local name=self.names[self.offset+i];b.name=name;b:SetShown(name~=nil)
+    if name then
+     -- A font file that fails to load falls back to Arial Narrow, so the name still shows.
+     if b.label:SetFont(H:FontPath(name),12,'')==false or not b.label:GetFont() then b.label:SetFont(H.builtinFonts['Arial Narrow'],12,'') end
+     b.label:SetText(name=='auto' and 'Automatic (Expressway if installed)' or name)
+     if name==H.settings.font then b.label:SetTextColor(.29,.86,.78) else b.label:SetTextColor(.85,.9,.93) end
+    end
+   end
+   -- Where the visible rows are in the whole list.
+   local track=PICKER_ROWS*20;self.bar:SetShown(count>PICKER_ROWS)
+   if count>PICKER_ROWS then
+    self.bar:SetHeight(math.max(12,track*PICKER_ROWS/count));self.bar:ClearAllPoints()
+    self.bar:SetPoint('TOPRIGHT',-3,-6-(track-self.bar:GetHeight())*self.offset/(count-PICKER_ROWS))
+   end
+  end
+  p:SetScript('OnMouseWheel',function(s,delta) s.offset=s.offset-delta*3;s:Refresh() end)
+  p:SetScript('OnHide',function() if H.SettingsListClosed then H.SettingsListClosed() end end)
+ end
+ if p:IsShown() then p:Hide();return end
+ p.names={'auto'};for _,name in ipairs(H:FontNames()) do p.names[#p.names+1]=name end
+ p.offset=0
+ for i,name in ipairs(p.names) do if name==H.settings.font then p.offset=i-math.floor(PICKER_ROWS/2) end end
+ p:ClearAllPoints();p:SetPoint('TOPLEFT',owner,'BOTTOMLEFT',0,-2);p:Refresh();p:Show()
+end
+
+H.OpenFontPicker=fontPicker
 function H:CreateSettingsPanel()
  if self.settingsPanel then return self.settingsPanel end
  local panel=CreateFrame('Frame','LegionKeyHistorySettings',UIParent);panel.name='Legion Key History';panel:Hide()
@@ -489,6 +547,8 @@ function H:CreateSettingsPanel()
  local scroll=CreateFrame('ScrollFrame','LegionKeyHistorySettingsScroll',panel,'UIPanelScrollFrameTemplate')
  scroll:SetPoint('TOPLEFT',4,-4);scroll:SetPoint('BOTTOMRIGHT',-28,4)
  local body=CreateFrame('Frame',nil,scroll);body:SetSize(560,1360);scroll:SetScrollChild(body)
+ -- Open lists stay where they opened, so scrolling the page closes them.
+ scroll:HookScript('OnVerticalScroll',function() CloseDropDownMenus();if H.fontPicker then H.fontPicker:Hide() end end)
  local y=-12
  local refreshers={}
  local function heading(text)
@@ -539,6 +599,10 @@ function H:CreateSettingsPanel()
  local minimap=check('Show the minimap icon','minimapHidden')
  minimap:SetScript('OnClick',function(s) H.settings.minimapHidden=not s:GetChecked();H:ApplySettings() end)
  refreshers[#refreshers+1]=function() minimap:SetChecked(not H.settings.minimapHidden) end
+ -- Font of the addon's windows. Automatic: ElvUI's Expressway when installed, else Arial Narrow.
+ local fontChoice=choice('Font',200,function() return H.settings.font=='auto' and 'Automatic' or H.settings.font end,function() end)
+ fontChoice:SetScript('OnClick',function(s) CloseDropDownMenus();fontPicker(s) end)
+ hoverPreview(fontChoice,'hud')
 
  heading('Scores in the game')
  -- One row per place, with separate switches for the score next to the name and the details on hover.
@@ -737,7 +801,7 @@ function H:CreateSettingsPanel()
  function panel:Refresh() for _,refresh in ipairs(refreshers) do refresh() end end
  panel.refresh=panel.Refresh
  panel:SetScript('OnShow',function(s) s:Refresh() end)
- panel:SetScript('OnHide',function() pinPreview(false);previewCheck:SetChecked(false) end)
+ panel:SetScript('OnHide',function() pinPreview(false);previewCheck:SetChecked(false);if H.fontPicker then H.fontPicker:Hide() end end)
  if InterfaceOptions_AddCategory then InterfaceOptions_AddCategory(panel) end
  return panel
 end

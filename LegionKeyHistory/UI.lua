@@ -1,11 +1,31 @@
 local H=LegionKeyHistory
 local PAGE_SIZE=8
-function H:FontPath()
- local media=LibStub and LibStub('LibSharedMedia-3.0',true)
- if media and media.IsValid and media:IsValid('font','Expressway') then return media:Fetch('font','Expressway') end
+-- Fonts every client has; LibSharedMedia (ElvUI and others) adds its own to the Font setting.
+H.builtinFonts={['Arial Narrow']='Fonts\\ARIALN.TTF',['Friz Quadrata TT']='Fonts\\FRIZQT__.TTF',['Morpheus']='Fonts\\MORPHEUS.TTF',['Skurri']='Fonts\\SKURRI.TTF'}
+local function sharedMedia() local media=LibStub and LibStub('LibSharedMedia-3.0',true);return media and media.IsValid and media end
+-- The Font setting: 'auto', or a font name from FontNames().
+function H:FontPath(name)
+ local media=sharedMedia();name=name or (self.settings and self.settings.font)
+ if name and name~='auto' then
+  if media and media:IsValid('font',name) then return media:Fetch('font',name) end
+  if self.builtinFonts[name] then return self.builtinFonts[name] end
+ end
+ if media and media:IsValid('font','Expressway') then return media:Fetch('font','Expressway') end
  -- Without ElvUI's Expressway, use the narrow Arial that ships with every client: the layout is
  -- sized for a narrow font, and the default Friz Quadrata makes text overflow its columns.
- return 'Fonts\\ARIALN.TTF'
+ return self.builtinFonts['Arial Narrow']
+end
+function H:FontNames()
+ local names,seen={},{}
+ local function add(name) if not seen[name] then seen[name]=true;names[#names+1]=name end end
+ for name in pairs(self.builtinFonts) do add(name) end
+ local media=sharedMedia();if media then for _,name in ipairs(media:List('font') or {}) do add(name) end end
+ table.sort(names,function(a,b) return a:lower()<b:lower() end)
+ return names
+end
+-- After the Font setting changes: every window of the addon that exists.
+function H:ApplyFontEverywhere()
+ for _,f in pairs({self.frame,self.hud,self.statsFrame,self.daysFrame,self.syncFrame,self.syncDebugFrame,self.leaderboardFrame,self.playerRunsFrame}) do self:ApplyFont(f) end
 end
 function H:ApplyFont(frame)
  if not frame then return end
