@@ -14,15 +14,12 @@ H.defaultSettings={
  scoreDecimals=false,scoreSuffix=false,scoreColor='4adbc8',scoreColorMode='rio',
  -- Score tooltip
  tipRanks=true,tipBestRun=true,tipTimedRuns=true,tipDungeons=true,tipWeekSplit=true,
- -- Sync: 'ask' every time, accept anyone in the 'party', or 'never'
- syncMode='ask',syncAutoTrusted=false,
  -- Journal (not on the settings page)
  showLaterDungeons=false,dayChart='bar',
  -- Font of the addon's windows: 'auto' (Expressway when installed, else Arial Narrow) or a font name
  font='auto'
 }
 local DEFAULT='Default'
-local SYNC_MODES={ask='Ask every time',party='Accept anyone in my party',never='Never'}
 local MODIFIERS={always='Always',ctrl='While holding CTRL',alt='While holding ALT',shift='While holding SHIFT'}
 local COLOR_MODES={custom='My colour',rio='Raider.IO style'}
 local SEARCH_STYLES={leaderTop='Leader and score on top',dungeonTop='Dungeon on top, leader below',plain='No leader or score'}
@@ -40,6 +37,9 @@ function H:InitializeProfiles()
  -- Saves from before profiles kept one settings table for the whole account.
  if db.settings then db.profiles[DEFAULT]=db.profiles[DEFAULT] or db.settings;db.settings=nil end
  db.profiles[DEFAULT]=db.profiles[DEFAULT] or {}
+ -- Sync (party run sharing) was removed in 1.8.0: drop what it saved.
+ db.syncDebug=nil
+ for _,profile in pairs(db.profiles) do profile.syncMode=nil;profile.syncAutoTrusted=nil end
  local name=db.profileKeys[characterKey()]
  if not name or not db.profiles[name] then name=DEFAULT end
  self.profileName=name
@@ -121,7 +121,6 @@ function H:ImportSettings(text)
   local default=self.defaultSettings[key]
   if type(default)=='boolean' and (value=='1' or value=='0') then target[key]=value=='1';count=count+1
   elseif type(default)=='number' and tonumber(value) then target[key]=tonumber(value);count=count+1
-  elseif key=='syncMode' and SYNC_MODES[value] then target[key]=value;count=count+1
   elseif key=='bestMode' and (value=='timed' or value=='completed') then target[key]=value;count=count+1
   elseif key=='dayChart' and (value=='line' or value=='bar') then target[key]=value;count=count+1
   elseif key=='hoverModifier' and MODIFIERS[value] then target[key]=value;count=count+1
@@ -720,15 +719,9 @@ function H:CreateSettingsPanel()
  check('Class rank column','hudClass','hud')
  check('Role rank column','hudRole','hud')
 
- heading('Sync')
- choice('Sync requests',190,function() return SYNC_MODES[H.settings.syncMode] or SYNC_MODES.ask end,function()
-  local items={}
-  for _,mode in ipairs({'ask','party','never'}) do
-   items[#items+1]={text=SYNC_MODES[mode],checked=H.settings.syncMode==mode,func=function() H.settings.syncMode=mode;H:ApplySettings() end}
-  end
-  return items
- end)
- check('When asking: approve friends and guild members automatically','syncAutoTrusted')
+ heading('Your group')
+ note('Everyone in your group side by side: score, ranks, best key per dungeon and timed keys. Also /lkh party.')
+ action('Open the group window',170,28,function() H:OpenParty() end);y=y-32
 
  heading('Profile')
  note('Every character uses the account-wide Default profile unless you pick another one here.')

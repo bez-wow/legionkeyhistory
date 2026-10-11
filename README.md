@@ -41,9 +41,11 @@ tells you in chat when a new version is out.
   Tyrannical key per dungeon.
 - **Journal** of every key you finish, with tank / healer / DPS, affixes and time; stats on
   your favourite dungeons and the people you play with.
-- **Sync** runs with friends in your party, and **Import from file** to fill in your history.
+- **Your group** (`/lkh party`): everyone in your group side by side, with their score, ranks,
+  best key per dungeon and timed keys; the group's best key in each dungeon is highlighted.
+- **Import from file** to fill in your history.
 - **Settings** (`/lkh config`): choose where scores show, the score style and colour, tooltip
-  contents, sync behaviour, and profiles.
+  contents, and profiles.
 
 Keys you complete count straight away for everyone in that group; other runs arrive with the
 next leaderboard update. Scores are unofficial: the sum of each character's best run score per
@@ -66,5 +68,5 @@ dungeon (formula from [Tauri Achievements](https://tauriachievements.github.io/m
 | `/lkh` | your journal |
 | `/lkh lb` | the leaderboard |
 | `/lkh config` | settings |
-| `/lkh sync` | sync with a party member |
+| `/lkh party` | your group, side by side |
 | `/lkh import` | import your runs from the leaderboard file |

@@ -333,6 +333,8 @@ local function starKey(level,upgrades,late)
  if late then return grey('+'..level,true) end
  return '|cffffc400'..string.rep('+',math.max(1,upgrades or 0))..'|r'..level
 end
+-- The same key text for other windows (the group window).
+function H:GoldKey(level,upgrades,late) return starKey(level,upgrades,late) end
 function H:PrepareScoreTooltip(p)
  if not p or p.tooltipRows then return end
  self.tooltipCacheQueue=self.tooltipCacheQueue or {}

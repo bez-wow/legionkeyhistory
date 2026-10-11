@@ -25,7 +25,7 @@ function H:FontNames()
 end
 -- After the Font setting changes: every window of the addon that exists.
 function H:ApplyFontEverywhere()
- for _,f in pairs({self.frame,self.hud,self.statsFrame,self.daysFrame,self.syncFrame,self.syncDebugFrame,self.leaderboardFrame,self.playerRunsFrame}) do self:ApplyFont(f) end
+ for _,f in pairs({self.frame,self.hud,self.statsFrame,self.daysFrame,self.leaderboardFrame,self.playerRunsFrame,self.partyFrame}) do self:ApplyFont(f) end
 end
 function H:ApplyFont(frame)
  if not frame then return end
@@ -40,8 +40,9 @@ function H:Front(frame)
  self:ApplyFont(frame)
  if not frame.lkhFrontHook then frame.lkhFrontHook=true;frame:HookScript('OnMouseDown',function() H:Front(frame) end) end
  local level=100
- for _,f in pairs({self.frame,self.hud,self.statsFrame,self.daysFrame,self.syncFrame,self.syncDebugFrame,self.leaderboardFrame}) do
-  if f and f:IsShown() then level=math.max(level,f:GetFrameLevel()) end
+ -- Above every other open window of the addon (the group window and a player's runs included).
+ for _,f in pairs({self.frame,self.hud,self.statsFrame,self.daysFrame,self.leaderboardFrame,self.playerRunsFrame,self.partyFrame}) do
+  if f and f~=frame and f:IsShown() then level=math.max(level,f:GetFrameLevel()) end
  end
  frame:SetFrameStrata('FULLSCREEN_DIALOG');frame:SetFrameLevel(level+20)
 end
@@ -62,6 +63,7 @@ function H:MinimapMenu()
   {text='Stats',notCheckable=true,func=function() H:OpenJournal();H:OpenStats() end},
   {text='Days',notCheckable=true,func=function() H:OpenJournal();H:OpenStats();H:OpenDays() end},
   {text='Leaderboard',notCheckable=true,func=function() H:OpenLeaderboard() end},
+  {text='Your group',notCheckable=true,func=function() H:OpenParty() end},
   {text='Settings',notCheckable=true,func=function() H:OpenSettings() end},
   {text='Hide icon from minimap',notCheckable=true,func=function() H:SetMinimapHidden(true) end}
  },self.minimapMenu,'cursor',0,0,'MENU')
@@ -265,7 +267,7 @@ function H:CreateUI()
  button(f,'X',24,994,-20,function() f:Hide() end)
  -- Import from file, the minimap icon and Personal Bests live on the settings page.
  button(f,'Leaderboard',105,581,-20,function() H:OpenLeaderboard() end)
- button(f,'Sync',65,698,-20,function() H:OpenSync() end)
+ button(f,'Party',65,698,-20,function() H:OpenParty() end)
  button(f,'Stats',85,775,-20,function() H:OpenStats() end)
  self.settingsButton=button(f,'Settings',95,872,-20,function() H:OpenSettings() end)
  self.dungeonButtons={}
@@ -464,7 +466,7 @@ function H:CreateMinimapButton()
   if which=='RightButton' then H:MinimapMenu()
   else H:OpenJournal() end
  end)
- b:SetScript('OnEnter',function(self) GameTooltip:SetOwner(self,'ANCHOR_LEFT');GameTooltip:SetText('Legion Key History');GameTooltip:AddLine('Left-click: open the journal',1,1,1);GameTooltip:AddLine('Right-click: Stats / Days / Leaderboard / Settings / hide icon',1,1,1);GameTooltip:AddLine('Drag: move around the minimap',.6,.8,.8);GameTooltip:Show() end)
+ b:SetScript('OnEnter',function(self) GameTooltip:SetOwner(self,'ANCHOR_LEFT');GameTooltip:SetText('Legion Key History');GameTooltip:AddLine('Left-click: open the journal',1,1,1);GameTooltip:AddLine('Right-click: Stats / Days / Leaderboard / Your group / Settings / hide icon',1,1,1);GameTooltip:AddLine('Drag: move around the minimap',.6,.8,.8);GameTooltip:Show() end)
  b:SetScript('OnLeave',function() GameTooltip:Hide() end)
  b:SetScript('OnDragStart',function(self)
   self.wasDragged=true;GameTooltip:Hide()

@@ -164,7 +164,7 @@ end
 
 H.laterDungeons={[227]=true,[234]=true,[233]=true,[239]=true}
 
--- Character identity, shared by the journal, stats, sync and the leaderboard.
+-- Character identity, shared by the journal, stats and the leaderboard.
 -- Lowercase A-Z only, so keys never depend on the client's locale (a locale-aware lower()
 -- can rewrite the bytes of accented letters).
 local function lowerASCII(s) return (s:gsub('[A-Z]',string.lower)) end
