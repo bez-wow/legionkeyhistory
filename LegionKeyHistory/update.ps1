@@ -1,9 +1,11 @@
 # Legion Key History updater, run by "LKH Updater.cmd".
 #   (no switch)  download the newest leaderboard file; also what the hourly task runs
 #   -Addon       install the newest addon version from GitHub, then refresh the leaderboard
+#   -Auto        what the hourly task runs: the leaderboard, plus the addon when you chose
+#                "leaderboard and addon" (auto-addon.txt) and WoW is not running
 # A failed or incomplete download never replaces what you have. /reload in WoW to load changes.
 # Exit codes: 0 done (or already up to date), 1 failed, 3 this folder is not writable.
-param([switch]$Addon, [switch]$Pause)  # -Pause: kept for updaters from 1.4.1
+param([switch]$Addon, [switch]$Auto, [switch]$Pause)  # -Pause: kept for updaters from 1.4.1
 $ErrorActionPreference = 'Stop'
 $DataSource = 'https://github.com/bez-wow/lkh-data/releases/latest/download/LeaderboardData.lua'
 $AddonRelease = 'https://api.github.com/repos/bez-wow/legionkeyhistory/releases/latest'
@@ -63,7 +65,10 @@ function Update-Addon {
         Write-Host "Checking for a new version (you have $current)..."
         $release = Invoke-RestMethod -Uri $AddonRelease -Headers @{ 'User-Agent' = 'LKH-Updater' } -TimeoutSec 60
         $latest = $release.tag_name.TrimStart('v')
-        if ([version]$latest -le [version]$current) { Log "You already have the newest version ($current). Nothing to update."; return $true }
+        if ([version]$latest -le [version]$current) {
+            if (-not $Auto) { Log "You already have the newest version ($current). Nothing to update." }  # not every hour in the log
+            return $true
+        }
         $asset = $release.assets | Where-Object { $_.name -like '*.zip' } | Select-Object -First 1
         if (-not $asset) { throw "release $latest has no zip" }
         Write-Host "Downloading Legion Key History $latest..."
@@ -80,7 +85,10 @@ function Update-Addon {
         foreach ($file in Get-ChildItem $source -File) {
             $target = Join-Path $PSScriptRoot $file.Name
             if ($file.Name -eq 'LeaderboardData.lua' -and (DataStamp $target) -ge (DataStamp $file.FullName)) { continue }
-            if ($file.Name -eq 'LKH Updater.cmd') { $target = "$target.new" }
+            # The zip's ImportedRuns.lua is an empty placeholder: never replace your own imported runs.
+            if ($file.Name -eq 'ImportedRuns.lua' -and (Test-Path $target)) { continue }
+            # Only the menu (not the hourly task) has "LKH Updater.cmd" open while this runs.
+            if ($file.Name -eq 'LKH Updater.cmd' -and -not $Auto) { $target = "$target.new" }
             Copy-Item $file.FullName $target -Force
         }
         Log "Addon updated from $current to $latest. Restart WoW (or /reload) to load it."
@@ -98,6 +106,13 @@ if (-not (Writable)) {
     if ($Pause) { Read-Host 'Press Enter to close' | Out-Null }
     exit 3
 }
+# The hourly task installs new addon versions only when asked to, and never while WoW is running:
+# WoW reads the addon when it starts, and a version that adds a file needs a full restart anyway.
+function WowRunning {
+    $wow = (Resolve-Path (Join-Path $PSScriptRoot '..\..\..')).Path
+    [bool](Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.Path -and $_.Path.StartsWith($wow, [StringComparison]::OrdinalIgnoreCase) })
+}
+if ($Auto -and (Test-Path (Join-Path $PSScriptRoot 'auto-addon.txt')) -and -not (WowRunning)) { $Addon = $true }
 if ($Addon) { $ok = Update-Addon; if ($ok) { $ok = Update-Data } } else { $ok = Update-Data }
 if ($Pause) { Write-Host ''; Read-Host 'Press Enter to close' | Out-Null }
 if ($ok) { exit 0 } else { exit 1 }

@@ -12,6 +12,8 @@ H.defaultSettings={
  searchStyle='leaderTop',hoverModifier='always',
  -- Score colour: 'custom' (scoreColor) or 'rio' (Raider.IO-style gradient)
  scoreDecimals=false,scoreSuffix=false,scoreColor='4adbc8',scoreColorMode='rio',
+ -- Friends' keys: answer friends/guild asking whether we're in a key; show theirs in the tooltip and list
+ shareKeyStatus=true,friendKeyStatus=true,friendKeyList=true,
  -- Score tooltip
  tipRanks=true,tipBestRun=true,tipTimedRuns=true,tipDungeons=true,tipWeekSplit=true,
  -- Journal (not on the settings page)
@@ -164,6 +166,32 @@ function H:CheckAddonVersion()
   return true
  end
  return false
+end
+-- Opening any LKH window with a newer version out: a small notice at the top of the screen, once
+-- per session, saying how to update.
+function H:UpdateNotice()
+ if self.updateNoticeShown then return end
+ local latest=LegionKeyHistoryLeaderboard and LegionKeyHistoryLeaderboard.latestAddon
+ local current=GetAddOnMetadata and GetAddOnMetadata('LegionKeyHistory','Version')
+ if not (latest and current and self:VersionNewer(latest,current)) then return end
+ self.updateNoticeShown=true
+ local f=self.updateNoticeFrame
+ if not f then
+  f=CreateFrame('Frame','LegionKeyHistoryUpdateNotice',UIParent);f:SetSize(420,118);f:SetPoint('TOP',0,-120)
+  f:SetFrameStrata('FULLSCREEN_DIALOG');f:SetFrameLevel(200);f:EnableMouse(true)
+  f:SetBackdrop({bgFile='Interface\\Buttons\\WHITE8X8',edgeFile='Interface\\Buttons\\WHITE8X8',edgeSize=1})
+  f:SetBackdropColor(.025,.035,.05,.97);f:SetBackdropBorderColor(.29,.86,.78)
+  f.title=f:CreateFontString(nil,'ARTWORK','GameFontNormalLarge');f.title:SetPoint('TOP',0,-12)
+  f.text=f:CreateFontString(nil,'ARTWORK','GameFontHighlight');f.text:SetPoint('TOP',0,-38);f.text:SetWidth(390);f.text:SetJustifyH('CENTER')
+  local ok=CreateFrame('Button',nil,f,'UIPanelButtonTemplate');ok:SetSize(90,22);ok:SetPoint('BOTTOM',0,10);ok:SetText('OK')
+  ok:SetScript('OnClick',function() f:Hide() end)
+  tinsert(UISpecialFrames,'LegionKeyHistoryUpdateNotice')
+  self.updateNoticeFrame=f
+ end
+ f.title:SetText('|cff4adbc8Legion Key History '..latest..' is out|r')
+ f.text:SetText('You have '..current..'. To update, run |cffffd100LKH Updater.cmd|r in your\nInterface\\AddOns\\LegionKeyHistory folder and choose |cffffd1003|r\n(Update the addon to the newest version), then restart WoW.')
+ f:Show()
+ return true
 end
 -- noSuffix: for places with their own "IO" heading, such as the applicant column.
 function H:FormatScore(score,noSuffix)
@@ -325,6 +353,31 @@ function H:CreateSettingsPreview(body,refreshers)
    local t=startTip();t:SetText(p.name,classColor(p.class));addScore(t,p.name,p.realm);t:Show()
   end
  end)
+ -- Friends in keys: a friend in a made-up Maw of Souls +11; the zone and the tooltip follow the settings.
+ local keys={}
+ view('friendkeys','Friends in keys',function(f)
+  shade(f,6,-22,BOX_W-12,32)
+  keys.name=boxText(f,'GameFontNormal',12,-25,150);keys.info=boxText(f,'GameFontDisableSmall',12,-40,190)
+  keys.score=f:CreateFontString(nil,'ARTWORK','GameFontNormalSmall');keys.score:SetPoint('TOPRIGHT',-14,-26)
+  keys.note=boxText(f,'GameFontHighlightSmall',10,-60,BOX_W-20)
+ end,function()
+  local p=players[1]
+  keys.name:SetText(p.name);keys.name:SetTextColor(classColor(p.class))
+  keys.score:SetText(H.settings.scoreFriends and H:FormatScore(p.score) or '');keys.score:SetTextColor(H:ScoreColor(p.score))
+  keys.note:SetText(H.settings.shareKeyStatus and '' or '|cff9d9d9dYou are not sharing your own key: friends will not see yours.|r')
+  box:SetHeight(H.settings.shareKeyStatus and 62 or 76)
+  if not H.WithFakeKeyStatus then return end
+  H:WithFakeKeyStatus(p.name,function()
+   local zone=H.settings.friendKeyList and H:KeyStatusZone(p.name)
+   keys.info:SetText(zone or 'Level 110 '..(CLASS_NAMES[p.class] or '')..' - Helmouth Cliffs')
+   if H.settings.friendKeyStatus or H.settings.hoverFriends then
+    local t=startTip();t:SetText(p.name,classColor(p.class))
+    H:AddKeyStatusTooltip(t,p.name)
+    if H.settings.hoverFriends then addScore(t,p.name,p.realm) end
+    t:Show()
+   end
+  end)
+ end)
  -- Applicants: Name | IO | Role | iLvl; the tooltip is the game's, plus the score for the
  -- listed dungeon (here the first player's best, so its line shows green).
  local app={rows={}}
@@ -443,9 +496,15 @@ function H:CreateSettingsPreview(body,refreshers)
  local owner,sticky,pinned
  -- A list an option opened: a dropdown, or the font list (which stays open while fonts are tried).
  local function listOpen() return (DropDownList1 and DropDownList1:IsShown()) or (H.fontPicker and H.fontPicker:IsShown()) end
+ -- Clicking an option (ticking a box, say) keeps its preview open after the mouse leaves, until
+ -- the mouse points at another control, so the change can be seen.
+ local clicked
  local function hoverPreview(frame,k)
-  frame:HookScript('OnEnter',function() if listOpen() and owner~=frame then return end;owner,sticky=frame,false;set(k) end)
-  frame:HookScript('OnLeave',function() if not pinned and not sticky and not listOpen() then owner=nil;set(nil) end end)
+  frame:HookScript('OnEnter',function() if listOpen() and owner~=frame then return end;if owner~=frame then clicked=false end;owner,sticky=frame,false;set(k) end)
+  frame:HookScript('OnLeave',function() if not pinned and not sticky and not clicked and not listOpen() then owner=nil;set(nil) end end)
+  if frame.HasScript and frame:HasScript('OnClick') then
+   frame:HookScript('OnClick',function() owner,clicked=frame,true;set(k) end)
+  end
  end
  local function listClosed() if owner and kind then sticky=true end end
  if DropDownList1 and DropDownList1.HookScript then DropDownList1:HookScript('OnHide',listClosed) end
@@ -455,13 +514,13 @@ function H:CreateSettingsPreview(body,refreshers)
  for _,f in ipairs({scroll,panel,InterfaceOptionsFrame,InterfaceOptionsFramePanelContainer}) do if f then neutral[f]=true end end
  local watch=CreateFrame('Frame',nil,panel or body)
  watch:SetScript('OnUpdate',function()
-  if pinned or not sticky or listOpen() then return end
+  if pinned or not (sticky or clicked) or listOpen() then return end
   local focus=GetMouseFocus and GetMouseFocus()
   if focus==owner then sticky=false
-  elseif focus and not neutral[focus] then sticky=false;owner=nil;set(nil) end
+  elseif focus and not neutral[focus] then sticky,clicked=false,false;owner=nil;set(nil) end
  end)
  local function pin(on)
-  pinned=on and true or false;sticky=false
+  pinned=on and true or false;sticky,clicked=false,false
   if pinned then set(kind or 'search') else owner=nil;set(nil) end
  end
  return set,hoverPreview,pin
@@ -719,6 +778,12 @@ function H:CreateSettingsPanel()
  check('Class rank column','hudClass','hud')
  check('Role rank column','hudRole','hud')
 
+ heading('Friends in keys')
+ note('Friends and guildmates who also use LKH tell you live whether they are in a key. Point at an option to see it; /lkh keytest shows it on a real friend.')
+ check('Share whether I am in a key with friends, guild and group','shareKeyStatus','friendkeys')
+ check('Show their key in the friends list tooltip (timer, bosses, forces, deaths)','friendKeyStatus','friendkeys')
+ check('Show their key instead of the zone in the friends list ("Maw of Souls +11")','friendKeyList','friendkeys')
+
  heading('Your group')
  note('Everyone in your group side by side: score, ranks, best key per dungeon and timed keys. Also /lkh party.')
  action('Open the group window',170,28,function() H:OpenParty() end);y=y-32
@@ -794,7 +859,7 @@ function H:CreateSettingsPanel()
 
  function panel:Refresh() for _,refresh in ipairs(refreshers) do refresh() end end
  panel.refresh=panel.Refresh
- panel:SetScript('OnShow',function(s) s:Refresh() end)
+ panel:SetScript('OnShow',function(s) s:Refresh();H:UpdateNotice() end)
  panel:SetScript('OnHide',function() pinPreview(false);previewCheck:SetChecked(false);if H.fontPicker then H.fontPicker:Hide() end end)
  if InterfaceOptions_AddCategory then InterfaceOptions_AddCategory(panel) end
  return panel

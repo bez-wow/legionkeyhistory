@@ -528,15 +528,29 @@ function H:InstallScoreHooks()
   end)
  end
  local function hook(name,fn) if type(_G[name])=='function' and not self.scoreHooks[name] then hooksecurefunc(name,fn);self.scoreHooks[name]=true end end
+ -- Friend tooltip: their key (when their LKH says they're in one), then the score.
+ local function friendHover(s)
+  if not H.settings.hoverFriends and not H.settings.friendKeyStatus then return end
+  local n,r=friendName(s)
+  if not n then return end
+  if H.AskKeyStatus and (H.settings.friendKeyStatus or H.settings.friendKeyList) then H:AskKeyStatus(n,r) end
+  GameTooltip:SetOwner(s,'ANCHOR_RIGHT');GameTooltip:SetText(n)
+  if H.AddKeyStatusTooltip then H:AddKeyStatusTooltip(GameTooltip,n) end
+  if H.settings.hoverFriends then H:AddScoreTooltip(GameTooltip,n,r) else GameTooltip:Show() end
+  if H.WatchKeyStatusTooltip then H:WatchKeyStatusTooltip(s,n,r,friendHover) end
+ end
  hook('FriendsFrame_UpdateFriendButton',function(row)
   local name,realm=friendName(row)
+  -- "Helmouth Cliffs" -> "Maw of Souls +11" while their LKH says they're in a key.
+  local zone=H.settings.friendKeyList and H.KeyStatusZone and name and H:KeyStatusZone(name)
+  if zone and row.info then row.info:SetText(zone) end
   if H.settings.scoreFriends then
    scoreLabel(row,name,realm)
    if row.name and name then row.name:SetWidth(math.max(60,row:GetWidth()-110)) end
   elseif row.lkhScore then row.lkhScore:Hide() end
   if not row.lkhHover then
    row.lkhHover=true
-   row:HookScript('OnEnter',function(s) if not H.settings.hoverFriends then return end;local n,r=friendName(s);if n then GameTooltip:SetOwner(s,'ANCHOR_RIGHT');GameTooltip:SetText(n);H:AddScoreTooltip(GameTooltip,n,r) end end)
+   row:HookScript('OnEnter',friendHover)
    row:HookScript('OnLeave',function() GameTooltip:Hide() end)
   end
  end)

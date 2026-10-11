@@ -37,6 +37,7 @@ function H:ApplyFont(frame)
 end
 function H:Front(frame)
  if not frame then return end
+ if frame~=self.hud and self.UpdateNotice then self:UpdateNotice() end
  self:ApplyFont(frame)
  if not frame.lkhFrontHook then frame.lkhFrontHook=true;frame:HookScript('OnMouseDown',function() H:Front(frame) end) end
  local level=100

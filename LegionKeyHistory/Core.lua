@@ -126,6 +126,8 @@ function H:CompleteRun(attempt)
   run={id='live:'..UnitGUID('player')..':'..time(),mapID=mapID,level=level,dungeon=name or ('Dungeon '..mapID),affixes={},source='live',owner=fullName('player'),ownerGUID=UnitGUID('player'),partial=true,rosterSource='live completion roster'}
  end
  run.endedAt=time();run.duration=ms/1000;run.level=level or run.level;run.status='completed';run.timed=timed;run.upgrades=upgrades
+ -- Friends asking while we're still inside see "Finished ... +11 in 21:40".
+ self.lastFinished={mapID=mapID,level=run.level,duration=run.duration,upgrades=upgrades,timed=timed,instanceID=select(8,GetInstanceInfo())}
  run.date=run.date or date('%Y-%m-%d %H:%M:%S',run.endedAt)
  local oldScore=self.PersonalScore and self:PersonalScore()
  self:CaptureParty(run);self:AddRun(run);self.db.active=nil
@@ -178,6 +180,7 @@ SlashCmdList.LEGIONKEYHISTORY=function(msg)
  if msg=='hud' then H.settings.hud=not H.settings.hud;H:RefreshHUD()
  elseif msg=='leaderboard' or msg=='lb' then H:OpenLeaderboard()
  elseif msg=='party' or msg=='group' then H:OpenParty()
+ elseif msg=='keytest' then H:FakeKeyStatus()
  elseif msg=='later' then H.settings.showLaterDungeons=not H.settings.showLaterDungeons;H:Refresh()
  elseif msg=='import' then H:ImportSnapshot()
  elseif msg=='config' or msg=='settings' or msg=='options' then H:OpenSettings()

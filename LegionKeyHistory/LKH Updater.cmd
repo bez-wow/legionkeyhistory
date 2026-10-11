@@ -1,12 +1,15 @@
 @echo off
 rem Legion Key History - updater.
-rem Keeps LeaderboardData.lua up to date with an hourly Windows scheduled task, and can
-rem install new addon versions. Double-click for the menu, or run with:
-rem   install / update / addon / uninstall
+rem Keeps LeaderboardData.lua up to date with an hourly Windows scheduled task (and, if you choose,
+rem installs new addon versions the same way), and can update the addon by hand. Double-click for
+rem the menu, or run with:
+rem   install / installaddon / update / addon / uninstall
 setlocal
 cd /d "%~dp0"
 set "TASK=LKH Leaderboard Update"
 if defined LKH_TASK set "TASK=%LKH_TASK%"
+rem Present when the hourly task also installs new addon versions (read by update.ps1 -Auto).
+set "AUTOADDON=%~dp0auto-addon.txt"
 
 if not exist "%~dp0LegionKeyHistory.toc" (
   echo This file must stay inside the LegionKeyHistory addon folder:
@@ -15,7 +18,8 @@ if not exist "%~dp0LegionKeyHistory.toc" (
   exit /b 1
 )
 
-if /i "%~1"=="install" goto install
+if /i "%~1"=="install" goto installdata
+if /i "%~1"=="installaddon" goto installboth
 if /i "%~1"=="update" goto update
 if /i "%~1"=="addon" goto addon
 if /i "%~1"=="uninstall" goto uninstall
@@ -25,22 +29,36 @@ cls
 echo  Legion Key History - updater
 echo  ============================
 echo.
-schtasks /Query /TN "%TASK%" >nul 2>&1 && (echo  Hourly leaderboard update: INSTALLED) || (echo  Hourly leaderboard update: not installed)
+schtasks /Query /TN "%TASK%" >nul 2>&1 && (
+  if exist "%AUTOADDON%" (echo  Hourly update: leaderboard and addon) else (echo  Hourly update: leaderboard only)
+) || (echo  Hourly update: not installed)
 call :writable || (echo  Note: Windows protects this folder - close this and run it as administrator.)
 echo.
-echo   1. Install the hourly leaderboard update
-echo   2. Update the leaderboard now
-echo   3. Update the addon to the newest version
-echo   4. Uninstall the hourly update
-echo   5. Exit
+echo   1. Hourly update: leaderboard only
+echo   2. Hourly update: leaderboard and addon (new versions install by themselves)
+echo   3. Update the addon to the newest version now
+echo   4. Update the leaderboard now
+echo   5. Turn off the hourly update
+echo   6. Exit
 echo.
-choice /C 12345 /N /M " Choose 1-5: "
-if errorlevel 5 exit /b 0
-if errorlevel 4 (call :uninstall & pause & goto menu)
+choice /C 123456 /N /M " Choose 1-6: "
+if errorlevel 6 exit /b 0
+if errorlevel 5 (call :uninstall & pause & goto menu)
+if errorlevel 4 (call :update & pause & goto menu)
 if errorlevel 3 goto addon
-if errorlevel 2 (call :update & pause & goto menu)
-call :install & pause & goto menu
+if errorlevel 2 (call :install both & pause & goto menu)
+call :install data & pause & goto menu
 
+:installdata
+call :install data
+exit /b %errorlevel%
+
+:installboth
+call :install both
+exit /b %errorlevel%
+
+rem :install data   - the hourly task downloads the leaderboard
+rem :install both   - ... and also installs new addon versions (only while WoW is closed)
 :install
 echo.
 call :ensurewritable || exit /b 1
@@ -57,10 +75,21 @@ if errorlevel 1 (
   echo Could not create the scheduled task.
   exit /b 1
 )
+if /i "%~1"=="both" (
+  echo Hourly update with new addon versions> "%AUTOADDON%"
+) else (
+  if exist "%AUTOADDON%" del "%AUTOADDON%" >nul 2>&1
+)
 echo.
-echo Installed. Every hour, while you are logged in to Windows, the leaderboard is
-echo updated in the background. In WoW, /reload or log in to load the newest one.
-echo To stop it, run this file again and choose Uninstall.
+if /i "%~1"=="both" (
+  echo Installed. Every hour, while you are logged in to Windows, the leaderboard is updated
+  echo in the background, and a new version of the addon is installed when there is one.
+  echo New versions are only installed while WoW is closed; start WoW again to load them.
+) else (
+  echo Installed. Every hour, while you are logged in to Windows, the leaderboard is
+  echo updated in the background. In WoW, /reload or log in to load the newest one.
+)
+echo To stop it, run this file again and choose 5.
 exit /b 0
 
 :update
@@ -81,13 +110,14 @@ goto menu
 
 :uninstall
 echo.
+if exist "%AUTOADDON%" del "%AUTOADDON%" >nul 2>&1
 schtasks /Query /TN "%TASK%" >nul 2>&1
 if errorlevel 1 (
-  echo The hourly leaderboard update is not installed.
+  echo The hourly update is not installed.
   exit /b 0
 )
 schtasks /Delete /TN "%TASK%" /F >nul
-echo Uninstalled. The leaderboard file you have stays; it just no longer updates by itself.
+echo Turned off. The leaderboard file you have stays; it just no longer updates by itself.
 exit /b 0
 
 :writable

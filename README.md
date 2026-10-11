@@ -17,15 +17,18 @@ everyone on the Tauri Mythic+ leaderboard, right in the game.
 > [!IMPORTANT]
 > The leaderboard inside the zip is a snapshot from the day you downloaded it. To keep scores
 > and ranks current, open the addon folder, double-click **`LKH Updater.cmd`** and choose
-> **1. Install the hourly leaderboard update**. It updates in the background every hour
-> (`/reload` in WoW to load the newest one). No .exe, Python, account or API key needed.
+> **1. Hourly update: leaderboard only**, or **2. Hourly update: leaderboard and addon** to also
+> get new addon versions by themselves. It runs in the background once an hour (`/reload` in
+> WoW to load the newest leaderboard; new addon versions are only installed while WoW is closed).
+> No .exe, Python, account or API key needed.
 
 **3. Import your history.** In game, open **Settings → Data → Import from file** (or type
 `/lkh import`). This adds every key your character already has on the leaderboard, so your
 journal and stats aren't empty. New keys are recorded automatically from now on.
 
-New addon versions: run `LKH Updater.cmd` again and choose **Update the addon**. The addon also
-tells you in chat when a new version is out.
+New addon versions: with option 2 they install by themselves; otherwise run `LKH Updater.cmd`
+and choose **3. Update the addon to the newest version**. When a new version is out, the addon
+tells you the first time you open one of its windows.
 
 **Prefer the web?** The same leaderboard is on
 [Tauri Achievements](https://tauriachievements.github.io/mythic-plus?view=players).
@@ -43,6 +46,9 @@ tells you in chat when a new version is out.
   your favourite dungeons and the people you play with.
 - **Your group** (`/lkh party`): everyone in your group side by side, with their score, ranks,
   best key per dungeon and timed keys; the group's best key in each dungeon is highlighted.
+- **Friends in keys:** friends and guildmates who also use LKH show their key live: the friends
+  list reads "Maw of Souls +11" instead of the zone, and the tooltip has their timer, chests,
+  bosses, forces and deaths.
 - **Import from file** to fill in your history.
 - **Settings** (`/lkh config`): choose where scores show, the score style and colour, tooltip
   contents, and profiles.
