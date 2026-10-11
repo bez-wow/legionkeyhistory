@@ -6,6 +6,9 @@ rem the menu, or run with:
 rem   install / installaddon / update / addon / uninstall
 setlocal
 cd /d "%~dp0"
+rem A newer menu left next to this one (the window was closed before it was swapped in): switch to
+rem it and run it instead. This all sits on one line, so cmd has read it before the file changes.
+if exist "%~dp0LKH Updater.cmd.new" (move /y "%~dp0LKH Updater.cmd.new" "%~f0" >nul & "%~f0" %* & exit /b)
 set "TASK=LKH Leaderboard Update"
 if defined LKH_TASK set "TASK=%LKH_TASK%"
 rem Present when the hourly task also installs new addon versions (read by update.ps1 -Auto).

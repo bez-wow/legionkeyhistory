@@ -113,6 +113,16 @@ function WowRunning {
     [bool](Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.Path -and $_.Path.StartsWith($wow, [StringComparison]::OrdinalIgnoreCase) })
 }
 if ($Auto -and (Test-Path (Join-Path $PSScriptRoot 'auto-addon.txt')) -and -not (WowRunning)) { $Addon = $true }
+# A new menu saved as "LKH Updater.cmd.new" while the old one was open, and the window was closed
+# before it could swap itself: the hourly task puts it in place (unless the menu is open now).
+function Install-NewMenu {
+    $new = Join-Path $PSScriptRoot 'LKH Updater.cmd.new'
+    if (-not (Test-Path $new)) { return }
+    $open = Get-CimInstance Win32_Process -Filter "Name='cmd.exe'" -ErrorAction SilentlyContinue | Where-Object { $_.CommandLine -like '*LKH Updater.cmd*' }
+    if ($open) { return }
+    try { Move-Item $new (Join-Path $PSScriptRoot 'LKH Updater.cmd') -Force; Log 'Installed the new LKH Updater.cmd menu.' } catch { }
+}
+if ($Auto) { Install-NewMenu }
 if ($Addon) { $ok = Update-Addon; if ($ok) { $ok = Update-Data } } else { $ok = Update-Data }
 if ($Pause) { Write-Host ''; Read-Host 'Press Enter to close' | Out-Null }
 if ($ok) { exit 0 } else { exit 1 }
