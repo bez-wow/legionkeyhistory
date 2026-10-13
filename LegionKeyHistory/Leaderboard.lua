@@ -187,21 +187,60 @@ function H:EffectiveScore(row)
  local p=self.localRows and self.localRows[row]
  return p and p.score or LegionKeyHistoryLeaderboard.scores[row]
 end
--- Overall rank counting locally recorded runs: players whose local runs beat their snapshot
--- score move up, and everyone they pass moves down one. Ties keep snapshot order.
+-- Total clear time (ms) of a player's best runs: on the same score, the faster player ranks higher.
+local function bestTime(p)
+ local total=0
+ for _,run in pairs(p and p.best or {}) do total=total+math.floor((run[3] or 0)*1000+.5) end
+ return total
+end
+-- Same, for a leaderboard row, counting locally recorded runs.
+function H:EffectiveTime(row)
+ local p=self.localRows and self.localRows[row]
+ if p then return bestTime(p) end
+ local data=LegionKeyHistoryLeaderboard
+ if data.rowTimes==nil then data.rowTimes={} end
+ local t=data.rowTimes[row]
+ if not t then t=bestTime(self:LeaderboardPlayer(row));data.rowTimes[row]=t end
+ return t
+end
+-- Overall rank, like the Tauri Achievements site: highest score first, then the lower total clear
+-- time of the best runs. Only the same score and time share a rank, and the places they take are
+-- skipped (1, 1, 1, 4). Rows are stored in that order, so a tie is the rows just above with the
+-- same score and time. Locally recorded runs can lift a player above their snapshot place.
 function H:EffectiveRank(row)
  local data=LegionKeyHistoryLeaderboard
  if not row or not data or not data.scores then return nil end
  self:LocalScores()
- if not next(self.localRows) then return row end
- local score,ahead=self:EffectiveScore(row),0
+ if not next(self.localRows) then
+  local score=data.scores[row]
+  if row==1 or data.scores[row-1]~=score then return row end
+  local time,first=self:EffectiveTime(row),row
+  while first>1 and data.scores[first-1]==score and self:EffectiveTime(first-1)==time do first=first-1 end
+  return first
+ end
+ local score,time,ahead=self:EffectiveScore(row),nil,0
  for other=1,#data.scores do
   if other~=row then
    local s=self:EffectiveScore(other)
-   if s>score or (s==score and other<row) then ahead=ahead+1 end
+   if s>score then ahead=ahead+1
+   elseif s==score then
+    time=time or self:EffectiveTime(row)
+    if self:EffectiveTime(other)<time then ahead=ahead+1 end
+   end
   end
  end
  return ahead+1
+end
+-- Leaderboard order with locally recorded runs: score, then time (only needed when a locally
+-- improved row is involved; snapshot rows are already in that order), then snapshot order.
+function H:RanksAbove(a,b)
+ local sa,sb=self:EffectiveScore(a),self:EffectiveScore(b)
+ if sa~=sb then return sa>sb end
+ if self.localRows and (self.localRows[a] or self.localRows[b]) then
+  local ta,tb=self:EffectiveTime(a),self:EffectiveTime(b)
+  if ta~=tb then return ta<tb end
+ end
+ return a<b
 end
 -- Rank to show for a PlayerScore record; nil for characters only seen in local runs.
 function H:PlayerRank(p)
@@ -721,26 +760,29 @@ function H:LeaderboardList(query,realm,classID,specName)
  local data=LegionKeyHistoryLeaderboard or {};local result={};query=lowerASCII(query or '')
  if not data.names then return result end
  local realmLower={};for i,r in ipairs(data.realmNames) do realmLower[i]=lowerASCII(r) end
- local specPattern=specName and ('#'..specName:gsub('%p','%%%0')..'=([%d.]+):')
+ local specPattern=specName and ('#'..specName:gsub('%p','%%%0')..'=([%d.]+):(%d+):')
  for row,name in ipairs(data.names) do
   local realmIndex=data.realms[row]
   if (not realm or realm=='All realms' or data.realmNames[realmIndex]==realm) and (not classID or classID==0 or data.classes[row]==classID)
    and searchMatches(name,realmLower[realmIndex],query) then
    if not specName then result[#result+1]=row
    else
-    local score=data.info[row]:match(specPattern)
-    if score then result[#result+1]={row=row,score=tonumber(score)} end
+    local score,rank=data.info[row]:match(specPattern)
+    if score then result[#result+1]={row=row,score=tonumber(score),rank=tonumber(rank)} end
    end
   end
  end
  if specName then
-  table.sort(result,function(a,b) if a.score~=b.score then return a.score>b.score end;return a.row<b.row end)
+  -- The spec rank already orders the same score by time.
+  table.sort(result,function(a,b) if a.score~=b.score then return a.score>b.score end;if a.rank~=b.rank then return a.rank<b.rank end;return a.row<b.row end)
+  -- Place in this list; the same score and time (the same spec rank) share it: 1, 1, 3.
+  for i,e in ipairs(result) do
+   local prev=result[i-1]
+   e.place=(prev and prev.score==e.score and prev.rank==e.rank) and prev.place or i
+  end
  elseif next(self:LocalScores() and self.localRows) then
   -- Locally recorded runs can lift players above their snapshot position.
-  table.sort(result,function(a,b)
-   local sa,sb=self:EffectiveScore(a),self:EffectiveScore(b)
-   if sa~=sb then return sa>sb end;return a<b
-  end)
+  table.sort(result,function(a,b) return self:RanksAbove(a,b) end)
  end
  return result
 end
@@ -748,7 +790,7 @@ function H:LeaderboardEntry(entry,position,specName)
  if type(entry)=='number' then return self:LocalScores() and self.localRows[entry] or self:LeaderboardPlayer(entry) end
  local p=entry and self:LeaderboardPlayer(entry.row);local spec=p and p.specs[specName]
  if not spec then return nil end
- return {name=p.name,realm=p.realm,class=p.class,score=spec.score,best=spec.best,spec=specName,rank=position}
+ return {name=p.name,realm=p.realm,class=p.class,score=spec.score,best=spec.best,spec=specName,rank=entry.place or position}
 end
 function H:RefreshLeaderboard()
  local f=self.leaderboardFrame;if not f then return end
@@ -771,7 +813,7 @@ function H:RefreshLeaderboard()
  if f.compareOnly and f.compareCount>0 then
   -- Only the picked players, best score first.
   rows={};for row in pairs(f.compare) do rows[#rows+1]=row end
-  table.sort(rows,function(a,b) local sa,sb=self:EffectiveScore(a),self:EffectiveScore(b);if sa~=sb then return sa>sb end;return a<b end)
+  table.sort(rows,function(a,b) return self:RanksAbove(a,b) end)
  else
   f.compareOnly=false
   rows=self:LeaderboardList(f.search:GetText(),realms[f.realm],f.classID,f.specName)
