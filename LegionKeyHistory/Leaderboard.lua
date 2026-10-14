@@ -282,6 +282,9 @@ function H:RunScore(run)
  self:ResolveTimer(run)
  local limit=run.timeLimit;local duration=run.duration;local level=run.level
  if not limit or limit<=0 or not duration or duration<=0 or not level then return nil end
+ -- More than 40% over the timer scores 0 (like Tauri Achievements); exactly 40% over still
+ -- scores. Whole milliseconds are compared so rounding can't move the boundary.
+ if math.floor(duration*1000+.5)>limit*1400 then return 0 end
  local ratio=duration/limit
  local score=ratio<=1 and (50+7.5*level+12.5*(1-ratio)) or (50+7.5*(level-1)-20*(ratio-1))
  return math.floor(math.max(0,score)*10+.5)/10
