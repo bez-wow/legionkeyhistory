@@ -21,6 +21,11 @@ everyone on the Tauri Mythic+ leaderboard, right in the game.
 > get new addon versions by themselves. It runs in the background once an hour (`/reload` in
 > WoW to load the newest leaderboard; new addon versions are only installed while WoW is closed).
 > No .exe, Python, account or API key needed.
+>
+> **Linux** (WoW in Wine, Lutris, Bottles or Steam): open a terminal in the addon folder and run
+> **`bash LKH-Updater.sh`**. It has the same menu, and the hourly update uses a systemd user
+> timer (or cron where there is no systemd). Needs `curl` or `wget`, and `unzip` (or `bsdtar` /
+> `python3`) for addon updates; most distributions ship them.
 
 **3. Import your history.** In game, open **Settings → Data → Import from file** (or type
 `/lkh import`). This adds every key your character already has on the leaderboard, so your

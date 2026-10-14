@@ -162,7 +162,7 @@ function H:CheckAddonVersion()
  local latest=LegionKeyHistoryLeaderboard and LegionKeyHistoryLeaderboard.latestAddon
  local current=GetAddOnMetadata and GetAddOnMetadata('LegionKeyHistory','Version')
  if latest and current and self:VersionNewer(latest,current) then
-  self.Message('Version '..latest..' is available (you have '..current..'). Run "LKH Updater.cmd" in the addon folder and choose "Update the addon".')
+  self.Message('Version '..latest..' is available (you have '..current..'). Run "LKH Updater.cmd" (Linux: "bash LKH-Updater.sh") in the addon folder and choose "Update the addon".')
   return true
  end
  return false
@@ -177,7 +177,7 @@ function H:UpdateNotice()
  self.updateNoticeShown=true
  local f=self.updateNoticeFrame
  if not f then
-  f=CreateFrame('Frame','LegionKeyHistoryUpdateNotice',UIParent);f:SetSize(420,118);f:SetPoint('TOP',0,-120)
+  f=CreateFrame('Frame','LegionKeyHistoryUpdateNotice',UIParent);f:SetSize(440,132);f:SetPoint('TOP',0,-120)
   f:SetFrameStrata('FULLSCREEN_DIALOG');f:SetFrameLevel(200);f:EnableMouse(true)
   f:SetBackdrop({bgFile='Interface\\Buttons\\WHITE8X8',edgeFile='Interface\\Buttons\\WHITE8X8',edgeSize=1})
   f:SetBackdropColor(.025,.035,.05,.97);f:SetBackdropBorderColor(.29,.86,.78)
@@ -189,7 +189,7 @@ function H:UpdateNotice()
   self.updateNoticeFrame=f
  end
  f.title:SetText('|cff4adbc8Legion Key History '..latest..' is out|r')
- f.text:SetText('You have '..current..'. To update, run |cffffd100LKH Updater.cmd|r in your\nInterface\\AddOns\\LegionKeyHistory folder and choose |cffffd1003|r\n(Update the addon to the newest version), then restart WoW.')
+ f.text:SetText('You have '..current..'. To update, run |cffffd100LKH Updater.cmd|r (Linux: |cffffd100LKH-Updater.sh|r) in your\nInterface\\AddOns\\LegionKeyHistory folder and choose |cffffd1003|r\n(Update the addon to the newest version), then restart WoW.')
  f:Show()
  return true
 end

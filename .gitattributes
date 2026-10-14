@@ -1,0 +1,2 @@
+# The Linux updater must keep LF line endings (bash fails on CR).
+*.sh text eol=lf
