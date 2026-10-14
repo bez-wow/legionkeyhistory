@@ -752,31 +752,73 @@ local function button(p,label,w,x,y,fn)
  local b=CreateFrame('Button',nil,p,'UIPanelButtonTemplate');b:SetSize(w,23);b:SetPoint('TOPLEFT',x,y);b:SetText(label);b:SetScript('OnClick',fn);return b
 end
 -- Matches "name realm" like a plain substring search, without building that string per row.
+-- Roles: tank / healer / dps, as the data file names them; the game's own role icons.
+local ROLE_NAMES={tank='Tank',healer='Healer',dps='DPS'}
+local ROLE_ORDER={'tank','healer','dps'}
+local ROLE_COORDS={tank={0,19,22,41},healer={20,39,1,20},dps={20,39,22,41}}
+local function roleIcon(role,size)
+ local c=ROLE_COORDS[role];if not c then return '' end
+ return string.format('|TInterface\\LFGFrame\\UI-LFG-ICON-PORTRAITROLES:%d:%d:0:0:64:64:%d:%d:%d:%d|t',size,size,c[1],c[2],c[3],c[4])
+end
+-- Tank, healer or dps of a class's spec, from the data file's spec list.
+local function specRole(class,spec)
+ for _,s in ipairs((LegionKeyHistoryLeaderboard or {}).specs or {}) do
+  if s.class==class and s.name==spec then return s.role end
+ end
+end
+-- The game's icon for a class's spec ("Restoration" of druids), looked up once.
+local specIcons
+local function specIcon(class,spec)
+ if not specIcons then
+  specIcons={}
+  if GetSpecializationInfoForClassID then
+   for c=1,12 do for i=1,4 do
+    local _,name,_,icon=GetSpecializationInfoForClassID(c,i)
+    if name then specIcons[c..':'..name]=icon end
+   end end
+  end
+ end
+ return spec and specIcons[class..':'..spec]
+end
+-- The spec shown beside a player: their highest-scoring one (within a role, when one is picked).
+local function mainSpec(p,role)
+ local best,score
+ for name,s in pairs(p.specs or {}) do
+  if (not role or specRole(p.class,name)==role) and (not score or s.score>score) then best,score=name,s.score end
+ end
+ return best
+end
 local function searchMatches(name,realm,query)
  if query=='' or name:find(query,1,true) or realm:find(query,1,true) then return true end
  local head,tail=query:match('^(.-) (.*)$')
  return head~=nil and name:sub(-#head)==head and realm:sub(1,#tail)==tail
 end
--- Returns leaderboard rows: row numbers, or {row=,score=} entries ranked within one spec.
+-- Returns leaderboard rows: row numbers, or {row=,score=} entries ranked within one spec or role.
 -- Use LeaderboardEntry to get the record to display.
-function H:LeaderboardList(query,realm,classID,specName)
+function H:LeaderboardList(query,realm,classID,specName,role)
  local data=LegionKeyHistoryLeaderboard or {};local result={};query=lowerASCII(query or '')
  if not data.names then return result end
  local realmLower={};for i,r in ipairs(data.realmNames) do realmLower[i]=lowerASCII(r) end
  local specPattern=specName and ('#'..specName:gsub('%p','%%%0')..'=([%d.]+):(%d+):')
+ local rolePattern=role and (','..role..'=([%d.]+):(%d+)')
+ if role then specName=nil;specPattern=nil end
  for row,name in ipairs(data.names) do
   local realmIndex=data.realms[row]
   if (not realm or realm=='All realms' or data.realmNames[realmIndex]==realm) and (not classID or classID==0 or data.classes[row]==classID)
    and searchMatches(name,realmLower[realmIndex],query) then
-   if not specName then result[#result+1]=row
+   if role then
+    -- Role scores and ranks: the third field, "dps=1228.3:1,tank=...".
+    local score,rank=(','..(data.info[row]:match('^[^|]*|[^|]*|([^|]*)') or '')):match(rolePattern)
+    if score then result[#result+1]={row=row,score=tonumber(score),rank=tonumber(rank)} end
+   elseif not specName then result[#result+1]=row
    else
     local score,rank=data.info[row]:match(specPattern)
     if score then result[#result+1]={row=row,score=tonumber(score),rank=tonumber(rank)} end
    end
   end
  end
- if specName then
-  -- The spec rank already orders the same score by time.
+ if specName or role then
+  -- The spec (role) rank already orders the same score by time.
   table.sort(result,function(a,b) if a.score~=b.score then return a.score>b.score end;if a.rank~=b.rank then return a.rank<b.rank end;return a.row<b.row end)
   -- Place in this list; the same score and time (the same spec rank) share it: 1, 1, 3.
   for i,e in ipairs(result) do
@@ -789,8 +831,22 @@ function H:LeaderboardList(query,realm,classID,specName)
  end
  return result
 end
-function H:LeaderboardEntry(entry,position,specName)
+function H:LeaderboardEntry(entry,position,specName,role)
  if type(entry)=='number' then return self:LocalScores() and self.localRows[entry] or self:LeaderboardPlayer(entry) end
+ if role then
+  local p=entry and self:LeaderboardPlayer(entry.row);if not p then return nil end
+  -- Best run per dungeon among the role's specs: highest score, then fastest.
+  local best={}
+  for name,s in pairs(p.specs) do
+   if specRole(p.class,name)==role then
+    for id,run in pairs(s.best or {}) do
+     local old=best[id]
+     if not old or run[1]>old[1] or (run[1]==old[1] and run[3]<old[3]) then best[id]=run end
+    end
+   end
+  end
+  return {name=p.name,realm=p.realm,class=p.class,score=entry.score,best=best,role=role,iconSpec=mainSpec(p,role),rank=entry.place or position}
+ end
  local p=entry and self:LeaderboardPlayer(entry.row);local spec=p and p.specs[specName]
  if not spec then return nil end
  return {name=p.name,realm=p.realm,class=p.class,score=spec.score,best=spec.best,spec=specName,rank=entry.place or position}
@@ -800,7 +856,8 @@ function H:RefreshLeaderboard()
  if f.help and f.title then f.help:ClearAllPoints();f.help:SetPoint('LEFT',f.title,'LEFT',math.ceil(f.title:GetStringWidth() or 300)+12,0) end
  local data=LegionKeyHistoryLeaderboard or {};local rows
  local runsView=f.view=='runs'
- f.playersButton:SetEnabled(runsView);f.runsButton:SetEnabled(not runsView)
+ f.playersButton:SetEnabled(runsView or f.role and true or false);f.runsButton:SetEnabled(not runsView)
+ f.rolesButton:SetEnabled(runsView or not f.role)
  for _,w in ipairs(f.runWidgets or {}) do w:SetShown(runsView) end
  if runsView then
   for _,w in ipairs(f.listOnly or {}) do w:Hide() end
@@ -819,7 +876,7 @@ function H:RefreshLeaderboard()
   table.sort(rows,function(a,b) return self:RanksAbove(a,b) end)
  else
   f.compareOnly=false
-  rows=self:LeaderboardList(f.search:GetText(),realms[f.realm],f.classID,f.specName)
+  rows=self:LeaderboardList(f.search:GetText(),realms[f.realm],f.classID,f.specName,f.role)
  end
  f.compareButton:SetText(f.compareMode and 'Stop' or 'Compare')
  f.compareShow:SetShown(f.compareMode and not f.compareOnly);f.compareShow:SetText('Show '..f.compareCount)
@@ -837,18 +894,27 @@ function H:RefreshLeaderboard()
   end
  end
  local pages=math.max(1,math.ceil(#rows/PAGE));f.page=math.max(1,math.min(f.page,pages))
- f.realmButton:SetText(realms[f.realm]);f.classButton:SetText(labels[f.classID] or 'All classes')
- f.specButton:SetShown(f.classID>0 and listing);f.specButton:SetText(f.specName or 'All specs')
+ f.classButton:SetText(labels[f.classID] or 'All classes')
+ -- Roles view: Tank / Healer / DPS take the place of the class and spec buttons.
+ f.classButton:SetShown(listing and not f.role)
+ f.specButton:SetShown(f.classID>0 and listing and not f.role);f.specButton:SetText(f.specName or 'All specs')
+ for role,b in pairs(f.roleButtons) do b:SetShown(listing and f.role and true or false);b:SetEnabled(f.role~=role) end
  f.status:SetText((data.season or 'No snapshot')..'  |  '..#rows..' players  |  Downloaded '..(data.downloaded or 'never')..self:DownloadedAgo(data.downloaded))
  f.pages:SetText(f.page..' / '..pages);f.prev:SetEnabled(f.page>1);f.next:SetEnabled(f.page<pages)
  f.empty:SetShown(#rows==0 and listing)
  for i,row in ipairs(f.rows) do
-  local position=(f.page-1)*PAGE+i;local entry=rows[position];local p=self:LeaderboardEntry(entry,position,f.specName);row.player=p;row:SetShown(p~=nil and listing)
+  local position=(f.page-1)*PAGE+i;local entry=rows[position];local p=self:LeaderboardEntry(entry,position,f.specName,f.role);row.player=p;row:SetShown(p~=nil and listing)
   row.entryRow=type(entry)=='table' and entry.row or entry
   local picked=f.compareMode and not f.compareOnly and row.entryRow and f.compare[row.entryRow]
   if picked then row:SetBackdropBorderColor(.97,.71,0) else row:SetBackdropBorderColor(.10,.15,.20) end
   if p then
-   row.rank:SetText(p.spec and p.rank or self:PlayerRank(p) or p.rank);row.name:SetText(p.name);row.realm:SetText(p.realm);row.score:SetText(string.format('%.1f',p.score))
+   row.rank:SetText((p.spec or p.role) and p.rank or self:PlayerRank(p) or p.rank);row.name:SetText(p.name);row.realm:SetText(p.realm);row.score:SetText(string.format('%.1f',p.score))
+   row.score:SetTextColor(self:ScoreColor(p.score))
+   -- Class and spec icons before the name, as on the website.
+   local coords=CLASS_ICON_TCOORDS and CLASS_ICON_TCOORDS[classes[p.class]]
+   if coords then row.classIcon:SetTexCoord(unpack(coords));row.classIcon:Show() else row.classIcon:Hide() end
+   local icon=specIcon(p.class,p.spec or p.iconSpec or mainSpec(p))
+   row.specIcon:SetTexture(icon);row.specIcon:SetShown(icon~=nil)
    local c=RAID_CLASS_COLORS and RAID_CLASS_COLORS[classes[p.class]];row.name:SetTextColor(c and c.r or .85,c and c.g or .9,c and c.b or .93)
    for j,d in ipairs(data.dungeons or {}) do
     local best=p.best[d.id]
@@ -961,10 +1027,10 @@ function H:CreateLeaderboard()
  f.search=CreateFrame('EditBox',nil,f,'InputBoxTemplate');f.search:SetSize(270,22);f.search:SetPoint('TOPLEFT',29,-87);f.search:SetAutoFocus(false)
  f.search:SetScript('OnEscapePressed',function(s) s:ClearFocus() end)
  f.searchLabel=text(f,10,24,-72,280,'SEARCH PLAYER / REALM')
- f.realm=2;f.classID=0;f.page=1;f.dungeon=false
- f.realmButton=button(f,'Evermoon',125,321,-86,function() f.realm=f.realm%#realms+1;f.page=1;H:RefreshLeaderboard() end)
- f.classButton=button(f,'All classes',125,458,-86,function() f.classID=(f.classID+1)%13;f.specName=nil;f.page=1;H:RefreshLeaderboard() end)
- f.specButton=button(f,'All specs',125,595,-86,function()
+ -- Always every realm (Evermoon, Tauri and WoD share one leaderboard in the game).
+ f.realm=1;f.classID=0;f.page=1;f.dungeon=false;f.role=false
+ f.classButton=button(f,'All classes',125,321,-86,function() f.classID=(f.classID+1)%13;f.specName=nil;f.role=false;f.page=1;H:RefreshLeaderboard() end)
+ f.specButton=button(f,'All specs',125,458,-86,function()
   if not f.specMenu then f.specMenu=CreateFrame('Frame','LKHSpecMenu',UIParent,'UIDropDownMenuTemplate') end
   local function selectSpec(name) f.specName=name;f.page=1;H:RefreshLeaderboard() end
   local menu={{text='All specs',checked=not f.specName,func=function() selectSpec(nil) end}}
@@ -973,8 +1039,14 @@ function H:CreateLeaderboard()
   end
   EasyMenu(menu,f.specMenu,'cursor',0,0,'MENU')
  end)
- f.findButton=button(f,'Find me',75,732,-86,function() f.realm=1;f.classID=0;f.specName=nil;f.page=1;f.search:SetText(UnitName('player') or '');H:RefreshLeaderboard() end)
- f.clearButton=button(f,'Clear',65,817,-86,function() f.realm=2;f.classID=0;f.specName=nil;f.page=1;f.search:SetText('');H:RefreshLeaderboard() end)
+ f.findButton=button(f,'Find me',75,732,-86,function() f.classID=0;f.specName=nil;f.role=false;f.page=1;f.search:SetText(UnitName('player') or '');H:RefreshLeaderboard() end)
+ f.clearButton=button(f,'Clear',65,817,-86,function() f.classID=0;f.specName=nil;f.role=false;f.page=1;f.search:SetText('');H:RefreshLeaderboard() end)
+ -- Roles: the tank, healer or DPS ladder, each player scored on the runs they played in it.
+ -- Roles view: which ladder, each player scored on the runs they played in that role.
+ f.roleButtons={}
+ for i,role in ipairs(ROLE_ORDER) do
+  f.roleButtons[role]=button(f,roleIcon(role,16)..' '..ROLE_NAMES[role],100,321+(i-1)*105,-86,function() f.role=role;f.page=1;H:RefreshLeaderboard() end)
+ end
  -- "i" next to the title: how the score works and where the data comes from.
  local help=CreateFrame('Button',nil,f);help:SetSize(22,22);help:SetPoint('TOPLEFT',335,-22);f.help=help
  help:SetBackdrop(backdrop);help:SetBackdropColor(.06,.08,.105,1);help:SetBackdropBorderColor(.29,.86,.78)
@@ -983,7 +1055,7 @@ function H:CreateLeaderboard()
   GameTooltip:SetOwner(s,'ANCHOR_LEFT');GameTooltip:SetText('Raider.IO-style score (unofficial)')
   GameTooltip:AddLine('Sum of the best run score in each listed dungeon. Fortified and Tyrannical are not counted separately.',1,1,1,true)
   GameTooltip:AddLine('Timed: 50 + 7.5 x level + 12.5 x fraction under timer.',.8,.9,.9,true)
-  GameTooltip:AddLine('Overtime: 50 + 7.5 x (level - 1) - 20 x fraction over timer; minimum 0.',.8,.9,.9,true)
+  GameTooltip:AddLine('Overtime: 50 + 7.5 x (level - 1) - 20 x fraction over timer. More than 40% over the timer scores 0.',.8,.9,.9,true)
   -- update_leaderboard_api.py reads the Tauri API live; update_leaderboard.py the GitHub snapshot.
   local live=(data.source or ''):find('Tauri armory API',1,true)
   GameTooltip:AddLine('Scored with the Tauri Achievements formula; these are not official Raider.IO ratings.',1,.8,.3,true)
@@ -1019,8 +1091,11 @@ function H:CreateLeaderboard()
  end
  -- Players or Runs. The Runs view ranks every run in the file by its score, as on the website.
  f.view='players';f.runOrder='best'
- f.playersButton=button(f,'Players',80,690,-20,function() f.view='players';f.page=1;H:RefreshLeaderboard() end)
- f.runsButton=button(f,'Runs',80,775,-20,function() f.view='runs';f.page=1;H:RefreshLeaderboard() end)
+ f.playersButton=button(f,'Players',80,605,-20,function() f.view='players';f.role=false;f.page=1;H:RefreshLeaderboard() end)
+ f.runsButton=button(f,'Runs',80,690,-20,function() f.view='runs';f.role=false;f.page=1;H:RefreshLeaderboard() end)
+ f.rolesButton=button(f,'Roles',80,775,-20,function()
+  f.view='players';f.role=f.role or 'tank';f.classID=0;f.specName=false;f.page=1;H:RefreshLeaderboard()
+ end)
  f.runOrderButton=button(f,'Order: Best',115,895,-94,function() f.runOrder=f.runOrder=='best' and 'latest' or 'best';f.page=1;H:RefreshLeaderboard() end)
  f.runHeaders,f.runLines=H:CreateRunLines(f,-140,-158)
  f.runWidgets={f.runOrderButton}
@@ -1042,7 +1117,10 @@ function H:CreateLeaderboard()
   local row=CreateFrame('Button',nil,f);f.rows[i]=row;row:SetSize(992,28);row:SetPoint('TOPLEFT',24,-145-(i-1)*30)
   row:SetBackdrop(backdrop);row:SetBackdropColor(.06,.08,.105,1);row:SetBackdropBorderColor(.10,.15,.20)
   row:SetHighlightTexture('Interface\\Buttons\\ButtonHilight-Square','ADD')
-  row.rank=text(row,11,4,-7,46);row.name=text(row,12,55,-7,205);row.realm=text(row,11,266,-7,105);row.score=text(row,12,378,-7,75);row.keys={};row.keyBg={};row.keyCells={}
+  row.rank=text(row,11,4,-7,46);row.name=text(row,12,93,-7,167);row.realm=text(row,11,266,-7,105);row.score=text(row,12,378,-7,75);row.keys={};row.keyBg={};row.keyCells={}
+  row.classIcon=row:CreateTexture(nil,'ARTWORK');row.classIcon:SetSize(16,16);row.classIcon:SetPoint('TOPLEFT',55,-6)
+  row.classIcon:SetTexture('Interface\\TargetingFrame\\UI-Classes-Circles')
+  row.specIcon=row:CreateTexture(nil,'ARTWORK');row.specIcon:SetSize(16,16);row.specIcon:SetPoint('TOPLEFT',73,-6)
   for j=1,#(data.dungeons or {}) do
    -- Each key is its own hover target: that run's time, result and score.
    local cell=CreateFrame('Button',nil,row);cell:SetSize(57,28);cell:SetPoint('TOPLEFT',456+(j-1)*59,0)
@@ -1114,7 +1192,8 @@ function H:CreateLeaderboard()
  f.pages=text(f,11,920,-521,65)
  f.next=button(f,'>',30,986,-515,function() f.page=f.page+1;H:RefreshLeaderboard() end)
  f.search:SetScript('OnTextChanged',function() f.page=1;H:RefreshLeaderboard() end)
- f.listOnly={f.search,f.searchLabel,f.realmButton,f.classButton,f.findButton,f.clearButton,f.footer,f.prev,f.pages,f.next,f.scoreHeader}
+ f.listOnly={f.search,f.searchLabel,f.classButton,f.findButton,f.clearButton,f.footer,f.prev,f.pages,f.next,f.scoreHeader}
+ for _,b in pairs(f.roleButtons) do f.listOnly[#f.listOnly+1]=b end
  for _,w in ipairs(f.tableHeaders) do f.listOnly[#f.listOnly+1]=w end
  for _,w in ipairs(f.dungeonHeaders) do f.listOnly[#f.listOnly+1]=w end
  f:Hide()
