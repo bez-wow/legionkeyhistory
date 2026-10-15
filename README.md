@@ -1,76 +1,47 @@
 # Legion Key History
 
-A Mythic+ addon for **Legion (7.3.5) on Tauri** — Evermoon, Tauri and Warriors of Darkness.
-It keeps a journal of every key you complete and shows Raider.IO-style scores and ranks for
-everyone on the Tauri Mythic+ leaderboard, right in the game.
+Raider.IO-style Mythic+ scores and leaderboards for **Legion (7.3.5) on Tauri** (Evermoon,
+Tauri and Warriors of Darkness), right in the game, plus a journal of every key you run.
 
 ## ⬇️ [Download LegionKeyHistory.zip](https://github.com/bez-wow/legionkeyhistory/releases/latest/download/LegionKeyHistory.zip)
 
-## Get started in 3 steps
+## Install
 
-**1. Install.** Extract the zip into `World of Warcraft\Interface\AddOns\`, so you end up with
-`Interface\AddOns\LegionKeyHistory\LegionKeyHistory.toc`. Start WoW and enable the addon.
-(Use the download link above, not GitHub's green "Code" button — that zip has the wrong folder name.)
+1. **Extract** the zip into `World of Warcraft\Interface\AddOns\`.
+2. **Open** `Interface\AddOns\LegionKeyHistory\LKH Updater.cmd` and **press 2**.
 
-**2. Turn on hourly leaderboard updates.**
+That's it. The leaderboard now updates every hour in the background, and new addon versions
+install by themselves (only while WoW is closed). Your keys already on the leaderboard are added
+to your journal the first time you log in.
 
-> [!IMPORTANT]
-> The leaderboard inside the zip is a snapshot from the day you downloaded it. To keep scores
-> and ranks current, open the addon folder, double-click **`LKH Updater.cmd`** and choose
-> **1. Hourly update: leaderboard only**, or **2. Hourly update: leaderboard and addon** to also
-> get new addon versions by themselves. It runs in the background once an hour (`/reload` in
-> WoW to load the newest leaderboard; new addon versions are only installed while WoW is closed).
-> No .exe, Python, account or API key needed.
->
-> **Linux** (WoW in Wine, Lutris, Bottles or Steam): open a terminal in the addon folder and run
-> **`bash LKH-Updater.sh`**. It has the same menu, and the hourly update uses a systemd user
-> timer (or cron where there is no systemd). Needs `curl` or `wget`, and `unzip` (or `bsdtar` /
-> `python3`) for addon updates; most distributions ship them.
-
-**3. Import your history.** In game, open **Settings → Data → Import from file** (or type
-`/lkh import`). This adds every key your character already has on the leaderboard, so your
-journal and stats aren't empty. New keys are recorded automatically from now on.
-
-New addon versions: with option 2 they install by themselves; otherwise run `LKH Updater.cmd`
-and choose **3. Update the addon to the newest version**. When a new version is out, the addon
-tells you the first time you open one of its windows.
-
-**Prefer the web?** The same leaderboard is on
-[Tauri Achievements](https://tauriachievements.github.io/mythic-plus?view=players).
-
-## What it does
-
-- **Scores everywhere:** friends list, group finder applicants and search results show each
-  player's score; hover for their overall / spec / class rank and best key per dungeon.
-- **Leaderboard** (`/lkh lb`): **Players** (search, realm and class filters, click a player to see
-  all their runs) and **Runs** (every run ranked by score, per dungeon, best or latest first).
-  **Compare** up to five players dungeon by dungeon; with two, a bar shows who leads and by how much.
-- **Personal Bests** next to the Dungeon Finder: your score, ranks and best Fortified and
-  Tyrannical key per dungeon.
-- **Journal** of every key you finish, with tank / healer / DPS, affixes and time; stats on
-  your favourite dungeons and the people you play with.
-- **Your group** (`/lkh party`): everyone in your group side by side, with their score, ranks,
-  best key per dungeon and timed keys; the group's best key in each dungeon is highlighted.
-- **Friends in keys:** friends and guildmates who also use LKH show their key live: the friends
-  list reads "Maw of Souls +11" instead of the zone, and the tooltip has their timer, chests,
-  bosses, forces and deaths.
-- **Import from file** to fill in your history.
-- **Settings** (`/lkh config`): choose where scores show, the score style and colour, tooltip
-  contents, and profiles.
-
-Keys you complete count straight away for everyone in that group; other runs arrive with the
-next leaderboard update. Scores are unofficial: the sum of each character's best run score per
-dungeon (formula from [Tauri Achievements](https://tauriachievements.github.io/mythic-plus/scoring)).
+> Use the download link above, not GitHub's green "Code" button: that zip has the wrong folder name.
+> On Mac or Linux, see [below](#mac-and-linux).
 
 ## Screenshots
 
-| Leaderboard | A player's runs |
+![Leaderboard](docs/screenshots/leaderboard.png)
+
+| Every run, by score | Compare players |
 |---|---|
-| ![Leaderboard](docs/screenshots/leaderboard.png) | ![Player runs](docs/screenshots/player-runs.png) |
-| **Compare** | **Friends list** |
-| ![Compare](docs/screenshots/compare.png) | ![Friends list](docs/screenshots/friends-list.png) |
-| **Your journal** | **Stats** |
-| ![Journal](docs/screenshots/journal.png) | ![Stats](docs/screenshots/stats.png) |
+| ![Runs](docs/screenshots/runs.png) | ![Compare](docs/screenshots/compare.png) |
+| **A player's runs** | **Friends list and tooltips** |
+| ![Player runs](docs/screenshots/player-runs.png) | ![Friends list](docs/screenshots/friends-list.png) |
+
+## What it does
+
+- **Scores on players:** in the friends list, the group finder and player tooltips, with their
+  overall, spec and class rank and best key per dungeon.
+- **Leaderboard** (`/lkh lb`): players, every run, and Tank / Healer / DPS ladders. Filter by
+  class and spec, click a player for all their runs, or compare up to five side by side.
+- **Friends in keys:** friends and guildmates who also use LKH show their key live ("Maw of Souls +11"), with
+  timer, bosses, forces and deaths in the tooltip.
+- **Your group** (`/lkh party`): everyone's score and best keys side by side.
+- **Journal** (`/lkh`): every key you finish, with your group, affixes and time, and stats on
+  your favourite dungeons and the people you play with.
+
+Scores are unofficial: the sum of each character's best run per dungeon, with the
+[Tauri Achievements](https://tauriachievements.github.io/mythic-plus/scoring) formula. The same
+leaderboard is on [the website](https://tauriachievements.github.io/mythic-plus?view=players).
 
 ## Commands
 
@@ -78,6 +49,20 @@ dungeon (formula from [Tauri Achievements](https://tauriachievements.github.io/m
 |---|---|
 | `/lkh` | your journal |
 | `/lkh lb` | the leaderboard |
+| `/lkh party` | your group |
 | `/lkh config` | settings |
-| `/lkh party` | your group, side by side |
-| `/lkh import` | import your runs from the leaderboard file |
+
+## Mac and Linux
+
+WoW in CrossOver, Whisky, Wine, Lutris, Bottles or Steam. Open a terminal, type `bash ` (with a
+space), drag `LKH-Updater.sh` from the addon folder into the window, press Enter, then **press 2**.
+
+It is the same menu as on Windows. The hourly update runs as a launchd agent on Mac, and as a
+systemd user timer (or cron) on Linux. Linux needs `curl` or `wget` and `unzip`, which most
+distributions have; a Mac has everything already.
+
+## Updating by hand
+
+Run the updater again: **3** installs the newest addon, **4** the newest leaderboard, **5** turns
+the hourly update off. In WoW, `/reload` loads a new leaderboard; a new addon version needs a
+restart.

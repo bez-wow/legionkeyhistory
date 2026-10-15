@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
-# Legion Key History - updater for Linux (WoW in Wine, Lutris, Bottles or Steam).
-# Keeps LeaderboardData.lua up to date every hour (a systemd user timer, or cron where there is
-# no systemd), and can install new addon versions. Run it from the addon folder:
+# Legion Key History - updater for Linux (WoW in Wine, Lutris, Bottles or Steam) and macOS
+# (CrossOver, Whisky or Wine).
+# Keeps LeaderboardData.lua up to date every hour (on Linux a systemd user timer, or cron where
+# there is no systemd; on macOS a launchd agent), and can install new addon versions.
+# Works with the bash 3.2 that macOS ships. Run it from the addon folder:
 #   bash LKH-Updater.sh                 the menu
 #   bash LKH-Updater.sh install         hourly update: leaderboard only
 #   bash LKH-Updater.sh installaddon    hourly update: leaderboard and addon
@@ -9,7 +11,7 @@
 #   bash LKH-Updater.sh addon           update the addon now
 #   bash LKH-Updater.sh uninstall       turn the hourly update off
 #   bash LKH-Updater.sh auto            what the hourly update runs
-# Needs curl or wget, and unzip, bsdtar or python3 for addon updates.
+# Needs curl or wget, and unzip, bsdtar or python3 for addon updates (macOS has all it needs).
 # A failed or incomplete download never replaces what you have. /reload in WoW to load changes.
 
 set -u
@@ -25,7 +27,16 @@ UNIT_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
 CRON_MARK="# Legion Key History hourly update: $DIR"
 # Present when the hourly update also installs new addon versions (same file as on Windows).
 AUTO_ADDON="$DIR/auto-addon.txt"
-LOG_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/LegionKeyHistory"
+MAC=0
+[ "$(uname -s 2>/dev/null)" = Darwin ] && MAC=1
+# macOS: a launchd agent in ~/Library/LaunchAgents.
+LABEL="io.github.bez-wow.$UNIT"
+AGENT="${LKH_AGENT_DIR:-$HOME/Library/LaunchAgents}/$LABEL.plist"
+if [ "$MAC" = 1 ]; then
+    LOG_DIR="$HOME/Library/Logs/LegionKeyHistory"
+else
+    LOG_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/LegionKeyHistory"
+fi
 LOG="$LOG_DIR/update.log"
 QUIET=0
 
@@ -50,7 +61,8 @@ fetch() {
 
 # The package manager's install command, for messages about a missing tool.
 install_hint() {
-    if command -v pacman >/dev/null 2>&1; then echo "sudo pacman -S $1"
+    if [ "$MAC" = 1 ]; then echo "brew install $1"
+    elif command -v pacman >/dev/null 2>&1; then echo "sudo pacman -S $1"
     elif command -v apt-get >/dev/null 2>&1; then echo "sudo apt install $1"
     elif command -v dnf >/dev/null 2>&1; then echo "sudo dnf install $1"
     elif command -v zypper >/dev/null 2>&1; then echo "sudo zypper install $1"
@@ -98,14 +110,25 @@ toc_version() {
     sed -n 's/^## Version:[[:space:]]*//p' "$1" | head -n 1 | tr -d '\r[:space:]'
 }
 
-# newer A B: whether version A is newer than B.
+# newer A B: whether version A is newer than B (1.10.0 > 1.9.7). Number by number, without
+# sort -V, which older macOS does not have.
 newer() {
-    [ "$1" != "$2" ] && [ "$(printf '%s\n%s\n' "$1" "$2" | sort -V | tail -n 1)" = "$1" ]
+    local a="$1" b="$2" x y
+    while [ -n "$a" ] || [ -n "$b" ]; do
+        x="${a%%.*}"; y="${b%%.*}"
+        case "$a" in *.*) a="${a#*.}" ;; *) a='' ;; esac
+        case "$b" in *.*) b="${b#*.}" ;; *) b='' ;; esac
+        x="${x//[!0-9]/}"; y="${y//[!0-9]/}"
+        [ "${x:-0}" -gt "${y:-0}" ] && return 0
+        [ "${x:-0}" -lt "${y:-0}" ] && return 1
+    done
+    return 1
 }
 
 unpack() {
     if command -v unzip >/dev/null 2>&1; then unzip -q -o "$1" -d "$2"
     elif command -v bsdtar >/dev/null 2>&1; then bsdtar -xf "$1" -C "$2"
+    elif command -v ditto >/dev/null 2>&1; then ditto -x -k "$1" "$2"
     elif command -v python3 >/dev/null 2>&1; then python3 -m zipfile -e "$1" "$2"
     else
         log "Cannot unpack the addon: install unzip ($(install_hint unzip)), then try again."
@@ -157,7 +180,22 @@ update_addon() {
 # Matches the process name Wine gives the game, not whole command lines (a terminal or launcher
 # command mentioning Wow.exe must not count).
 wow_running() {
-    pgrep -i '^(wow|wow-64|wowt|wowb)\.exe$' >/dev/null 2>&1
+    pgrep -i '^(wow|wow-64|wowt|wowb)\.exe$' >/dev/null 2>&1 && return 0
+    # macOS: Wine (CrossOver, Whisky) keeps its own process name, so look for the game's path as
+    # an argument ("...\Wow-64.exe"), and for the Mac client by name.
+    [ "$MAC" = 1 ] || return 1
+    pgrep -if '[\\/](wow|wow-64|wowt|wowb)\.exe([[:space:]]|$)' >/dev/null 2>&1 || pgrep -x 'World of Warcraft' >/dev/null 2>&1
+}
+
+# The text, safe inside the launchd plist (XML).
+xml() {
+    local t="$1"
+    t="${t//&/&amp;}"; t="${t//</&lt;}"; t="${t//>/&gt;}"
+    printf '%s' "$t"
+}
+
+agent_loaded() {
+    launchctl list "$LABEL" >/dev/null 2>&1
 }
 
 have_systemd() {
@@ -165,11 +203,19 @@ have_systemd() {
 }
 
 schedule_status() {
+    if [ "$MAC" = 1 ]; then [ -f "$AGENT" ] && agent_loaded; return; fi
     if [ -f "$UNIT_DIR/$UNIT.timer" ] && have_systemd && systemctl --user is-enabled "$UNIT.timer" >/dev/null 2>&1; then return 0; fi
     command -v crontab >/dev/null 2>&1 && crontab -l 2>/dev/null | grep -qF "$CRON_MARK"
 }
 
 remove_schedule() {
+    if [ "$MAC" = 1 ]; then
+        if agent_loaded; then
+            launchctl bootout "gui/$(id -u)/$LABEL" >/dev/null 2>&1 || launchctl unload "$AGENT" >/dev/null 2>&1
+        fi
+        rm -f "$AGENT"
+        return 0
+    fi
     if [ -f "$UNIT_DIR/$UNIT.timer" ]; then
         have_systemd && systemctl --user disable --now "$UNIT.timer" >/dev/null 2>&1
         rm -f "$UNIT_DIR/$UNIT.timer" "$UNIT_DIR/$UNIT.service"
@@ -195,7 +241,26 @@ install_schedule() {
         return 1
     fi
     remove_schedule
-    if have_systemd; then
+    if [ "$MAC" = 1 ]; then
+        # Every hour; launchd catches up after the Mac wakes from sleep.
+        mkdir -p "$(dirname "$AGENT")"
+        cat > "$AGENT" <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key><string>$LABEL</string>
+    <key>ProgramArguments</key>
+    <array><string>/bin/bash</string><string>$(xml "$SELF")</string><string>auto</string></array>
+    <key>StartInterval</key><integer>3600</integer>
+    <key>ProcessType</key><string>Background</string>
+    <key>LowPriorityIO</key><true/>
+</dict>
+</plist>
+EOF
+        launchctl bootstrap "gui/$(id -u)" "$AGENT" >/dev/null 2>&1 || launchctl load -w "$AGENT" >/dev/null 2>&1
+        agent_loaded || { echo 'Could not start the launchd agent.'; return 1; }
+    elif have_systemd; then
         # systemd treats % specially, so a folder name with one is escaped.
         local exec_path="${SELF//%/%%}"
         mkdir -p "$UNIT_DIR"

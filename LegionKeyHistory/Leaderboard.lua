@@ -1029,7 +1029,17 @@ function H:CreateLeaderboard()
  f.searchLabel=text(f,10,24,-72,280,'SEARCH PLAYER / REALM')
  -- Always every realm (Evermoon, Tauri and WoD share one leaderboard in the game).
  f.realm=1;f.classID=0;f.page=1;f.dungeon=false;f.role=false
- f.classButton=button(f,'All classes',125,321,-86,function() f.classID=(f.classID+1)%13;f.specName=nil;f.role=false;f.page=1;H:RefreshLeaderboard() end)
+ -- A drop-down with every class in its colour, like the spec button.
+ f.classButton=button(f,'All classes',125,321,-86,function()
+  if not f.classMenu then f.classMenu=CreateFrame('Frame','LKHClassMenu',UIParent,'UIDropDownMenuTemplate') end
+  local function selectClass(id) f.classID=id;f.specName=false;f.role=false;f.page=1;H:RefreshLeaderboard() end
+  local menu={{text='All classes',checked=f.classID==0,func=function() selectClass(0) end}}
+  for id,label in ipairs(labels) do
+   local c=RAID_CLASS_COLORS and RAID_CLASS_COLORS[classes[id]]
+   menu[#menu+1]={text=c and string.format('|cff%02x%02x%02x%s|r',c.r*255+.5,c.g*255+.5,c.b*255+.5,label) or label,checked=f.classID==id,func=function() selectClass(id) end}
+  end
+  EasyMenu(menu,f.classMenu,'cursor',0,0,'MENU')
+ end)
  f.specButton=button(f,'All specs',125,458,-86,function()
   if not f.specMenu then f.specMenu=CreateFrame('Frame','LKHSpecMenu',UIParent,'UIDropDownMenuTemplate') end
   local function selectSpec(name) f.specName=name;f.page=1;H:RefreshLeaderboard() end
