@@ -14,6 +14,8 @@ H.defaultSettings={
  scoreDecimals=false,scoreSuffix=false,scoreColor='4adbc8',scoreColorMode='rio',
  -- Friends' keys: answer friends/guild asking whether we're in a key; show theirs in the tooltip and list
  shareKeyStatus=true,friendKeyStatus=true,friendKeyList=true,
+ -- Party keys: the window in dungeons with each group member's keystone (partyKeysPoint: where)
+ partyKeys=true,partyKeysLocked=false,
  -- Score tooltip
  tipRanks=true,tipBestRun=true,tipTimedRuns=true,tipDungeons=true,tipWeekSplit=true,
  -- Journal (not on the settings page)
@@ -143,6 +145,7 @@ function H:ApplySettings()
  if self.frame and self.frame:IsShown() and self.Refresh then self:Refresh() end
  if self.leaderboardFrame and self.leaderboardFrame:IsShown() and self.RefreshLeaderboard then self:RefreshLeaderboard() end
  if FriendsFrame and FriendsFrame:IsShown() and FriendsList_Update then pcall(FriendsList_Update) end
+ if self.RefreshPartyKeys then self:RefreshPartyKeys() end
  if self.settingsPanel and self.settingsPanel:IsShown() then self.settingsPanel:Refresh() end
 end
 
@@ -796,6 +799,11 @@ function H:CreateSettingsPanel()
  check('Share whether I am in a key with friends, guild and group','shareKeyStatus','friendkeys')
  check('Show their key in the friends list tooltip (timer, bosses, forces, deaths)','friendKeyStatus','friendkeys')
  check('Show their key instead of the zone in the friends list ("Maw of Souls +11")','friendKeyList','friendkeys')
+
+ heading('Party keys')
+ note('Inside a dungeon, a small window lists the keystone each group member has; keys for the dungeon you are in are on top, in green. Group members with LKH send theirs; keystones linked in party chat (!keys) count too.')
+ check('Show the party keys window in dungeons','partyKeys')
+ action('Move it',90,28,function() H:TogglePartyKeysLock() end);y=y-32
 
  heading('Your group')
  note('Everyone in your group side by side: score, ranks, best key per dungeon and timed keys. Also /lkh party.')

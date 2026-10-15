@@ -35,6 +35,8 @@ to your journal the first time you log in.
   class and spec, click a player for all their runs, or compare up to five side by side.
 - **Friends in keys:** friends and guildmates who also use LKH show their key live ("Maw of Souls +11"), with
   timer, bosses, forces and deaths in the tooltip.
+- **Party keys:** inside a dungeon, a small window shows each group member's keystone, with
+  keys for that dungeon on top. Drag it, then click the lock (`/lkh keys` to move it again).
 - **Your group** (`/lkh party`): everyone's score and best keys side by side.
 - **Journal** (`/lkh`): every key you finish, with your group, affixes and time, and stats on
   your favourite dungeons and the people you play with.
@@ -50,6 +52,7 @@ leaderboard is on [the website](https://tauriachievements.github.io/mythic-plus?
 | `/lkh` | your journal |
 | `/lkh lb` | the leaderboard |
 | `/lkh party` | your group |
+| `/lkh keys` | move the party keys window (`/lkh keystest` to preview it) |
 | `/lkh config` | settings |
 
 ## Mac and Linux
