@@ -165,7 +165,7 @@ function H:RefreshParty()
     else
      local b=p and p.best[d.id];local late=b and self:OverTime(i,b)
      cell[1]:SetText(b and self:GoldKey(b[2],self:KeyUpgrades(b[3],self:DungeonTimer(i)),late) or '|cff657080-|r')
-     cell[2]:SetText(b and string.format(late and '|cff7a7a7a%.1f|r' or '%.1f',b[1]) or '')
+     cell[2]:SetText(b and (late and string.format('|cff7a7a7a%.1f|r',b[1]) or self:ColoredScore(b[1],true)) or '')
      values[1][k]=b and b[1] or 0
     end
    end

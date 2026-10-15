@@ -965,7 +965,7 @@ function H:RefreshCompareView(f,rows)
    local x,w,just=column(k)
    put(h.name,view,x+8,-8,w,just);put(h.sub,view,x+8,-26,w,just)
    h.name:SetText(p.name);h.name:SetTextColor(colors[k][1],colors[k][2],colors[k][3])
-   h.sub:SetText(string.format('%.1f  |  #%d',p.score,self:PlayerRank(p) or p.rank))
+   h.sub:SetText(self:ColoredScore(p.score)..string.format('  |  #%d',self:PlayerRank(p) or p.rank))
   end
  end
  view.leadHead:SetShown(duel)
@@ -996,8 +996,8 @@ function H:RefreshCompareView(f,rows)
    for k,p in ipairs(players) do
     local b=d and p.best[d.id];values[k]=total and p.score or (b and b[1] or 0)
     local x,w,just=column(k);put(r.cells[k],r,x,-8,w,just)
-    r.cells[k]:SetText(total and string.format('%.1f',p.score)
-     or b and (self:KeyText(b[2],self:KeyUpgrades(b[3],self:DungeonTimer(i)),10)..'   '..string.format('%.1f',b[1])) or '|cff657080-|r')
+    r.cells[k]:SetText(total and self:ColoredScore(p.score)
+     or b and (self:KeyText(b[2],self:KeyUpgrades(b[3],self:DungeonTimer(i)),10)..'   '..self:ColoredScore(b[1],true)) or '|cff657080-|r')
    end
    for k=n+1,#r.cells do r.cells[k]:Hide() end
    local top=math.max(0,unpack(values))
@@ -1425,7 +1425,7 @@ function H:FillRunLine(line,run,rank)
   list[#list+1]=memberText(data,m)
  end
  line.cells[6]:SetText(table.concat(tank,'  '));line.cells[7]:SetText(table.concat(healer,'  '));line.cells[8]:SetText(table.concat(dps,'  '))
- line.cells[9]:SetText(string.format('%.1f',run.score));line.cells[10]:SetText(self:Ago(run.stamp))
+ line.cells[9]:SetText(self:ColoredScore(run.score,true));line.cells[10]:SetText(self:Ago(run.stamp))
 end
 function H:OpenPlayerRuns(row)
  local data=LegionKeyHistoryLeaderboard;if not data or not data.names or not data.names[row] then return end
@@ -1446,7 +1446,7 @@ function H:RefreshPlayerRuns()
  local ranks=data.runRankByLine or {}
  local c=RAID_CLASS_COLORS and RAID_CLASS_COLORS[classes[p.class]]
  f.title:SetText((c and string.format('|cff%02x%02x%02x',c.r*255,c.g*255,c.b*255) or '')..p.name..'|r  '..p.realm)
- f.status:SetText(string.format('%.1f points  |  Rank %s  |  %d runs in the leaderboard file',p.score,tostring(self:PlayerRank(p) or '?'),#runs))
+ f.status:SetText(self:ColoredScore(p.score)..string.format(' points  |  Rank %s  |  %d runs in the leaderboard file',tostring(self:PlayerRank(p) or '?'),#runs))
  f.orderButton:SetText(f.order=='best' and 'Order: Best' or 'Order: Latest')
  local pages=math.max(1,math.ceil(#runs/PAGE));f.page=math.max(1,math.min(f.page,pages))
  f.pages:SetText(f.page..' / '..pages);f.prev:SetEnabled(f.page>1);f.next:SetEnabled(f.page<pages)

@@ -199,10 +199,11 @@ function H:FormatScore(score,noSuffix)
  return (self.settings.scoreSuffix and not noSuffix) and (text..' IO') or text
 end
 -- Raider.IO colours a score by where it stands among all players this season: white up to the
--- 40th percentile, green at the 40th, blue at the 75th, purple at the 90th and orange for the top
--- 0.5%, blended in between. Raider.IO's own numbers come from retail's formula, so the anchors
--- are taken from this leaderboard instead (its scores are stored best first).
-local TIER_COLORS={{1,1,1},{.12,1,0},{0,.44,.87},{.64,.21,.93},{1,.5,0}}
+-- 40th percentile, green at the 40th, blue at the 75th, purple at the 90th, orange for the top 1%
+-- and gold (the game's UI gold, ffd100) for the top 0.1%, blended in between. Raider.IO's own numbers come from
+-- retail's formula, so the anchors are taken from this leaderboard instead (its scores are stored
+-- best first).
+local TIER_COLORS={{1,1,1},{.12,1,0},{0,.44,.87},{.64,.21,.93},{1,.5,0},{1,.82,0}}
 function H:ScoreTiers()
  local scores=LegionKeyHistoryLeaderboard and LegionKeyHistoryLeaderboard.scores
  if not scores or #scores<20 then return nil end
@@ -211,7 +212,7 @@ function H:ScoreTiers()
   while n>1 and (scores[n] or 0)<=0 do n=n-1 end
   -- The score that the best `share` of players reach.
   local function top(share) return scores[math.max(1,math.ceil(n*share))] end
-  self.scoreTiersFor=scores;self.scoreTiers={scores[n],top(.60),top(.25),top(.10),top(.005)}
+  self.scoreTiersFor=scores;self.scoreTiers={scores[n],top(.60),top(.25),top(.10),top(.01),top(.001)}
  end
  return self.scoreTiers
 end
@@ -223,10 +224,11 @@ function H:ScoreColor(score)
  local tiers=mode~='custom' and score and score>0 and self:ScoreTiers()
  if tiers then
   local r,g,b
-  if score>=tiers[5] then r,g,b=unpack(TIER_COLORS[5])
+  local last=#tiers
+  if score>=tiers[last] then r,g,b=unpack(TIER_COLORS[last])
   elseif score<tiers[1] then r,g,b=.62,.62,.62
   else
-   for i=1,4 do
+   for i=1,last-1 do
     if score<tiers[i+1] then
      local a,c=TIER_COLORS[i],TIER_COLORS[i+1];local t=(score-tiers[i])/math.max(tiers[i+1]-tiers[i],.001)
      r,g,b=a[1]+(c[1]-a[1])*t,a[2]+(c[2]-a[2])*t,a[3]+(c[3]-a[3])*t
@@ -238,6 +240,17 @@ function H:ScoreColor(score)
  end
  local hex=tostring(self.settings.scoreColor or ''):match('^%x%x%x%x%x%x$') or self.defaultSettings.scoreColor
  return tonumber(hex:sub(1,2),16)/255,tonumber(hex:sub(3,4),16)/255,tonumber(hex:sub(5,6),16)/255,'|cff'..hex
+end
+-- One run's score on the same colours: as if every dungeon had that run (score x dungeons), so a
+-- run that would make a top-1% player is orange.
+function H:RunScoreColor(score)
+ local dungeons=#((LegionKeyHistoryLeaderboard or {}).dungeons or {})
+ return self:ScoreColor(score and score*math.max(dungeons,1))
+end
+-- "|cff..1787.6|r": a score in its colour, for text built from pieces.
+function H:ColoredScore(score,run)
+ local hex=select(4,(run and self.RunScoreColor or self.ScoreColor)(self,score))
+ return hex..string.format('%.1f',score or 0)..'|r'
 end
 function H:SetScoreColor(r,g,b)
  self.settings.scoreColor=rgbHex(r,g,b)
