@@ -60,14 +60,14 @@ function H:SetMinimapHidden(hidden)
 end
 function H:MinimapMenu()
  if not self.minimapMenu then self.minimapMenu=CreateFrame('Frame','LegionKeyHistoryMinimapMenu',UIParent,'UIDropDownMenuTemplate') end
- EasyMenu({
+ self:Menu({
   {text='Stats',notCheckable=true,func=function() H:OpenJournal();H:OpenStats() end},
   {text='Days',notCheckable=true,func=function() H:OpenJournal();H:OpenStats();H:OpenDays() end},
   {text='Leaderboard',notCheckable=true,func=function() H:OpenLeaderboard() end},
   {text='Your group',notCheckable=true,func=function() H:OpenParty() end},
   {text='Settings',notCheckable=true,func=function() H:OpenSettings() end},
   {text='Hide icon from minimap',notCheckable=true,func=function() H:SetMinimapHidden(true) end}
- },self.minimapMenu,'cursor',0,0,'MENU')
+ },self.minimapMenu)
 end
 local bg={bgFile='Interface\\Buttons\\WHITE8X8',edgeFile='Interface\\Buttons\\WHITE8X8',edgeSize=1}
 local function text(parent,size,x,y,value)

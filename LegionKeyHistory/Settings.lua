@@ -550,7 +550,7 @@ end
 local function menu(owner,items)
  if not H.settingsMenu then H.settingsMenu=CreateFrame('Frame','LKHSettingsMenu',UIParent,'UIDropDownMenuTemplate') end
  if H.fontPicker then H.fontPicker:Hide() end
- EasyMenu(items,H.settingsMenu,owner,0,0,'MENU')
+ H:Menu(items,H.settingsMenu,owner)
 end
 
 local function confirm(text,onAccept)

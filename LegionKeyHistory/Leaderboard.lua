@@ -780,6 +780,17 @@ local function specIcon(class,spec)
  end
  return spec and specIcons[class..':'..spec]
 end
+-- A class name in its class colour ("Paladin" in pink), for the class button and menu.
+local function classLabel(id)
+ local label=labels[id];if not label then return 'All classes' end
+ local c=RAID_CLASS_COLORS and RAID_CLASS_COLORS[classes[id]]
+ return c and string.format('|cff%02x%02x%02x%s|r',c.r*255+.5,c.g*255+.5,c.b*255+.5,label) or label
+end
+-- A spec name with its icon in front, for the spec button and menu.
+local function specLabel(class,spec,size)
+ local icon=specIcon(class,spec)
+ return icon and string.format('|T%s:%d:%d:0:0:64:64:5:59:5:59|t %s',icon,size,size,spec) or spec
+end
 -- The spec shown beside a player: their highest-scoring one (within a role, when one is picked).
 local function mainSpec(p,role)
  local best,score
@@ -894,10 +905,10 @@ function H:RefreshLeaderboard()
   end
  end
  local pages=math.max(1,math.ceil(#rows/PAGE));f.page=math.max(1,math.min(f.page,pages))
- f.classButton:SetText(labels[f.classID] or 'All classes')
+ f.classButton:SetText(classLabel(f.classID))
  -- Roles view: Tank / Healer / DPS take the place of the class and spec buttons.
  f.classButton:SetShown(listing and not f.role)
- f.specButton:SetShown(f.classID>0 and listing and not f.role);f.specButton:SetText(f.specName or 'All specs')
+ f.specButton:SetShown(f.classID>0 and listing and not f.role);f.specButton:SetText(f.specName and specLabel(f.classID,f.specName,14) or 'All specs')
  for role,b in pairs(f.roleButtons) do b:SetShown(listing and f.role and true or false);b:SetEnabled(f.role~=role) end
  f.status:SetText((data.season or 'No snapshot')..'  |  '..#rows..' players  |  Downloaded '..(data.downloaded or 'never')..self:DownloadedAgo(data.downloaded))
  f.pages:SetText(f.page..' / '..pages);f.prev:SetEnabled(f.page>1);f.next:SetEnabled(f.page<pages)
@@ -1034,20 +1045,19 @@ function H:CreateLeaderboard()
   if not f.classMenu then f.classMenu=CreateFrame('Frame','LKHClassMenu',UIParent,'UIDropDownMenuTemplate') end
   local function selectClass(id) f.classID=id;f.specName=false;f.role=false;f.page=1;H:RefreshLeaderboard() end
   local menu={{text='All classes',checked=f.classID==0,func=function() selectClass(0) end}}
-  for id,label in ipairs(labels) do
-   local c=RAID_CLASS_COLORS and RAID_CLASS_COLORS[classes[id]]
-   menu[#menu+1]={text=c and string.format('|cff%02x%02x%02x%s|r',c.r*255+.5,c.g*255+.5,c.b*255+.5,label) or label,checked=f.classID==id,func=function() selectClass(id) end}
+  for id in ipairs(labels) do
+   menu[#menu+1]={text=classLabel(id),checked=f.classID==id,func=function() selectClass(id) end}
   end
-  EasyMenu(menu,f.classMenu,'cursor',0,0,'MENU')
+  H:Menu(menu,f.classMenu)
  end)
  f.specButton=button(f,'All specs',125,458,-86,function()
   if not f.specMenu then f.specMenu=CreateFrame('Frame','LKHSpecMenu',UIParent,'UIDropDownMenuTemplate') end
   local function selectSpec(name) f.specName=name;f.page=1;H:RefreshLeaderboard() end
   local menu={{text='All specs',checked=not f.specName,func=function() selectSpec(nil) end}}
   for _,spec in ipairs((LegionKeyHistoryLeaderboard or {}).specs or {}) do
-   if spec.class==f.classID then local name=spec.name;menu[#menu+1]={text=name,checked=f.specName==name,func=function() selectSpec(name) end} end
+   if spec.class==f.classID then local name=spec.name;menu[#menu+1]={text=specLabel(spec.class,name,16),checked=f.specName==name,func=function() selectSpec(name) end} end
   end
-  EasyMenu(menu,f.specMenu,'cursor',0,0,'MENU')
+  H:Menu(menu,f.specMenu)
  end)
  f.findButton=button(f,'Find me',75,732,-86,function() f.classID=0;f.specName=nil;f.role=false;f.page=1;f.search:SetText(UnitName('player') or '');H:RefreshLeaderboard() end)
  f.clearButton=button(f,'Clear',65,817,-86,function() f.classID=0;f.specName=nil;f.role=false;f.page=1;f.search:SetText('');H:RefreshLeaderboard() end)

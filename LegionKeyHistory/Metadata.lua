@@ -51,6 +51,20 @@ end
 
 -- Instance IDs differ from challenge-map IDs on Legion completion events.
 H.instanceMaps={[1456]=197,[1466]=198,[1501]=199,[1477]=200,[1492]=208,[1458]=206,[1516]=209,[1493]=207,[1571]=210,[1677]=233,[1753]=239}
+-- A drop-down menu (at the cursor, or under anchor) on a solid black background, so the window behind it doesn't
+-- show through (the game's menu, and UI skins like ElvUI, are see-through). The black is only
+-- under LKH's menus: the shared menu list hides it again for any other addon's menu.
+function H:Menu(items,holder,anchor)
+ EasyMenu(items,holder,anchor or 'cursor',0,0,'MENU')
+ local list=DropDownList1
+ if not list or not list.CreateTexture then return end
+ if not list.lkhSolid then
+  local t=list:CreateTexture(nil,'BACKGROUND');t:SetColorTexture(0,0,0,1)
+  t:SetPoint('TOPLEFT',2,-2);t:SetPoint('BOTTOMRIGHT',-2,2);list.lkhSolid=t
+  list:HookScript('OnShow',function(s) s.lkhSolid:Hide() end)
+ end
+ list.lkhSolid:SetShown(list:IsShown())
+end
 function H:NormalizeMap(id)
  return self.instanceMaps[id] or id
 end
