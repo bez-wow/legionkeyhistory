@@ -1,7 +1,8 @@
 -- Party keys: a small window, only inside a dungeon, with the keystone each group member has.
 -- Keys whose dungeon is the one you're in are on top, in green. Group members with LKH send theirs
 -- (a hidden addon message to the group); keystones linked in party chat (answers to !keys) count too.
--- Drag the window by its icon, then click the lock (top right). /lkh keys unlocks it again.
+-- Drag the window by its icon, then click the lock (top right); X turns it off. /lkh keys unlocks it
+-- again. The first time it shows, a "new feature" callout (Setup.lua) explains it.
 local H=LegionKeyHistory
 local PREFIX='LKHK'
 local KEYSTONE_ITEM=138019
@@ -105,7 +106,7 @@ end
 local function setLocked(locked)
  H.settings.partyKeysLocked=locked
  frame:EnableMouse(not locked)
- frame.mover:SetShown(not locked);frame.lock:SetShown(not locked)
+ frame.mover:SetShown(not locked);frame.lock:SetShown(not locked);frame.close:SetShown(not locked)
  -- Locked: a faint background, no border.
  frame:SetBackdropColor(0,0,0,locked and .25 or .55)
  frame:SetBackdropBorderColor(.29,.86,.78,locked and 0 or 1)
@@ -130,13 +131,23 @@ local function create()
  -- The drag icon (top left) and the lock (top right), only while unlocked.
  local mover=frame:CreateTexture(nil,'OVERLAY');mover:SetSize(18,18);mover:SetPoint('TOPLEFT',4,-3)
  mover:SetTexture('Interface\\CURSOR\\UI-Cursor-Move');frame.mover=mover
- local lock=CreateFrame('Button',nil,frame);lock:SetSize(18,18);lock:SetPoint('TOPRIGHT',-3,-2)
+ local lock=CreateFrame('Button',nil,frame);lock:SetSize(18,18);lock:SetPoint('TOPRIGHT',-22,-2)
  lock:SetNormalTexture('Interface\\Buttons\\LockButton-Unlocked-Up');lock:SetPushedTexture('Interface\\Buttons\\LockButton-Locked-Down')
  lock:SetHighlightTexture('Interface\\Buttons\\UI-Common-MouseHilight','ADD')
  lock:SetScript('OnClick',function() setLocked(true);H.Message('Party keys locked. /lkh keys to move it again.') end)
  lock:SetScript('OnEnter',function(s) GameTooltip:SetOwner(s,'ANCHOR_RIGHT');GameTooltip:SetText('Lock');GameTooltip:AddLine('/lkh keys unlocks it again.',1,1,1);GameTooltip:Show() end)
  lock:SetScript('OnLeave',function() GameTooltip:Hide() end)
  frame.lock=lock
+ -- X: turn it off for good (Settings > Windows turns it back on).
+ local close=CreateFrame('Button',nil,frame,'UIPanelCloseButton');close:SetSize(22,22);close:SetPoint('TOPRIGHT',1,1)
+ close:SetScript('OnClick',function()
+  H.partyKeysPreview=nil;H.settings.partyKeys=false
+  if H.MarkFeatureSeen then H:MarkFeatureSeen('partyKeys') end
+  setLocked(true);frame:Hide();H.Message('Party keys turned off. /lkh config (Windows) turns it back on.')
+ end)
+ close:SetScript('OnEnter',function(s) GameTooltip:SetOwner(s,'ANCHOR_RIGHT');GameTooltip:SetText('Turn off');GameTooltip:AddLine('/lkh config (Windows) turns it back on.',1,1,1);GameTooltip:Show() end)
+ close:SetScript('OnLeave',function() GameTooltip:Hide() end)
+ frame.close=close
  frame.lines={}
  setLocked(H.settings.partyKeysLocked)
  frame:Hide()
@@ -166,19 +177,30 @@ function H:RefreshPartyKeys()
  end
  for i=#rows+1,#frame.lines do frame.lines[i]:Hide() end
  frame:SetHeight(14+(#rows+1)*ROW_H)
- -- Not placed yet (first time in a dungeon): say how, once per session.
- if not self.settings.partyKeysLocked and not frame:IsShown() and not self.partyKeysHinted then
-  self.partyKeysHinted=true
-  self.Message('Party keys: drag the window by its icon to where you want it, then click the lock (top right).')
- end
  frame:Show()
+ -- New to this player: a note beside it on what it is and how to move or turn it off.
+ if self.FeatureCallout and self.partyKeysPreview~='setup' then self:FeatureCallout('partyKeys',frame) end
 end
 
--- /lkh keystest: the window with a made-up group for 30 seconds, wherever you are.
-function H:PreviewPartyKeys()
- self.partyKeysPreview=true;self:RefreshPartyKeys()
+-- The window with a made-up group in Halls of Valor, wherever you are:
+--   PreviewPartyKeys()         /lkh keystest: 30 seconds
+--   PreviewPartyKeys('setup')  setup: until PreviewPartyKeys(false), unlocked so it can be placed
+local previewToken=0
+function H:PreviewPartyKeys(mode)
+ previewToken=previewToken+1
+ if mode==false then self.partyKeysPreview=nil;self:RefreshPartyKeys();return end
+ self.partyKeysPreview=mode=='setup' and 'setup' or true
+ if mode=='setup' then if not frame then create() end;setLocked(false) end
+ self:RefreshPartyKeys()
+ if mode=='setup' then return end
  self.Message('Party keys preview for 30 seconds (made-up group in Halls of Valor). /lkh keys to move it.')
- C_Timer.After(30,function() self.partyKeysPreview=nil;self:RefreshPartyKeys() end)
+ local token=previewToken
+ C_Timer.After(30,function() if previewToken==token then self.partyKeysPreview=nil;self:RefreshPartyKeys() end end)
+end
+
+-- Locks it where it is (the end of setup).
+function H:LockPartyKeys()
+ if frame then setLocked(true);self:RefreshPartyKeys() end
 end
 
 -- /lkh keys: unlock to move it (shown even outside a dungeon), or lock it again.

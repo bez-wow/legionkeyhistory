@@ -160,11 +160,13 @@ function H:VersionNewer(a,b)
  end
  return false
 end
--- Once per login: the leaderboard file carries the newest released version.
+-- Once per session: the leaderboard file carries the newest released version.
 function H:CheckAddonVersion()
  local latest=LegionKeyHistoryLeaderboard and LegionKeyHistoryLeaderboard.latestAddon
  local current=GetAddOnMetadata and GetAddOnMetadata('LegionKeyHistory','Version')
  if latest and current and self:VersionNewer(latest,current) then
+  if self.versionToldInChat then return true end
+  self.versionToldInChat=true
   self.Message('Version '..latest..' is available (you have '..current..'). Run "LKH Updater.cmd" (Linux: "bash LKH-Updater.sh") in the addon folder and choose "Update the addon".')
   return true
  end
@@ -333,6 +335,24 @@ local function bestDungeon(p)
  return {id=nil,short='BRH',name='Black Rook Hold'},8
 end
 
+-- Of `controls` ({frame=,kind=}), the visible one nearest the mouse: its kind and the distance
+-- (0 when the mouse is on it).
+function H.NearestPreview(controls)
+ if not GetCursorPosition then return end
+ local mx,my=GetCursorPosition()
+ local best,bestDistance
+ for _,c in ipairs(controls) do
+  local f=c.frame
+  if f:IsVisible() and f:GetLeft() then
+   local scale=f:GetEffectiveScale();local x,y=mx/scale,my/scale
+   local dx=math.max(f:GetLeft()-x,0,x-f:GetRight());local dy=math.max(f:GetBottom()-y,0,y-f:GetTop())
+   local distance=math.sqrt(dx*dx+dy*dy)
+   if not bestDistance or distance<bestDistance then best,bestDistance=c,distance end
+  end
+ end
+ if best then return best.kind,bestDistance end
+end
+
 function H:CreateSettingsPreview(body,refreshers)
  local box=CreateFrame('Frame','LegionKeyHistorySettingsPreview',UIParent);box:SetSize(BOX_W,60);box:SetFrameStrata('DIALOG');box:Hide()
  box:SetBackdrop({bgFile='Interface\\Buttons\\WHITE8X8',edgeFile='Interface\\Buttons\\WHITE8X8',edgeSize=1})
@@ -457,23 +477,28 @@ function H:CreateSettingsPreview(body,refreshers)
   if on then addScore(t,p.name,p.realm) end
   t:Show()
  end)
- -- Score style and colour: players with scores from high to the middle of the leaderboard.
+ -- Score style and colour: one real player from each Raider.IO colour band (top 0.1%, 1%, 10%,
+ -- 25%, 60% and below), best first, so every colour shows; with one colour they all share it.
  local look={rows={}}
+ local BANDS={{.001,'Top 0.1%'},{.01,'Top 1%'},{.10,'Top 10%'},{.25,'Top 25%'},{.60,'Top 60%'},{.85,''}}
  view('look','Score style and colour',function(f)
-  for i=1,4 do
+  for i=1,#BANDS do
    local y=-22-(i-1)*24;shade(f,6,y,BOX_W-12,22)
    local row={};look.rows[i]=row
-   row.name=boxText(f,'GameFontNormal',12,y-5,140)
+   row.name=boxText(f,'GameFontNormal',12,y-5,120)
+   row.band=boxText(f,'GameFontDisableSmall',136,y-6,60)
    row.score=f:CreateFontString(nil,'ARTWORK','GameFontNormal');row.score:SetPoint('TOPRIGHT',-14,y-5)
   end
  end,function()
-  local sorted={};for i,p in ipairs(players) do sorted[i]=p end
-  table.sort(sorted,function(a,b) return (a.score or 0)<(b.score or 0) end)
+  local data=LegionKeyHistoryLeaderboard;local n=data and data.names and #data.names or 0
   for i,row in ipairs(look.rows) do
-   local p=sorted[i];row.name:SetText(p.name);row.name:SetTextColor(classColor(p.class))
+   local share=BANDS[i][1]
+   local p=n>=50 and H.LeaderboardPlayer and H:LeaderboardPlayer(math.max(1,math.ceil(n*share))) or FALLBACK[(i-1)%#FALLBACK+1]
+   row.name:SetText(p.name);row.name:SetTextColor(classColor(p.class))
+   row.band:SetText(H.settings.scoreColorMode~='custom' and BANDS[i][2] or '')
    row.score:SetText(H:FormatScore(p.score));row.score:SetTextColor(H:ScoreColor(p.score))
   end
-  box:SetHeight(124)
+  box:SetHeight(28+#BANDS*24)
  end)
  -- show(view) opens the window on that view beside the settings; show(nil) closes it.
  local function show(key)
@@ -483,7 +508,7 @@ function H:CreateSettingsPreview(body,refreshers)
   for k,v in pairs(views) do v.frame:SetShown(k==current) end
   caption:SetText('PREVIEW  |cff9d9d9d'..views[current].label..'|r')
   tip:Hide()
-  box:ClearAllPoints();box:SetPoint('TOPLEFT',InterfaceOptionsFrame or UIParent,'TOPRIGHT',6,0);box:Show()
+  box:ClearAllPoints();box:SetPoint('TOPLEFT',H.previewAnchor or InterfaceOptionsFrame or UIParent,'TOPRIGHT',6,0);box:Show()
   views[current].update()
  end
  -- One preview at a time beside the settings: a view in the window above, 'tooltip' (your own
@@ -491,7 +516,7 @@ function H:CreateSettingsPreview(body,refreshers)
  local kind
  local function showTooltip()
   local name,realm=UnitName('player');local _,class=UnitClass('player')
-  tip:SetOwner(UIParent,'ANCHOR_NONE');tip:ClearAllPoints();tip:SetPoint('TOPLEFT',InterfaceOptionsFrame or UIParent,'TOPRIGHT',6,0)
+  tip:SetOwner(UIParent,'ANCHOR_NONE');tip:ClearAllPoints();tip:SetPoint('TOPLEFT',H.previewAnchor or InterfaceOptionsFrame or UIParent,'TOPRIGHT',6,0)
   tip:SetText(name or '',classColor(class));tip:AddLine('Preview: your own score tooltip',.6,.6,.6)
   addScore(tip,name,realm);tip:Show()
  end
@@ -506,40 +531,47 @@ function H:CreateSettingsPreview(body,refreshers)
  refreshers[#refreshers+1]=function()
   if kind=='tooltip' then showTooltip() elseif kind and kind~='hud' then show(kind) end
  end
- -- A preview shows while the mouse is over its option, and while the dropdown that option opened
- -- is open. After a pick it stays ("sticky") so the result can be seen, until the mouse points at
- -- another control or leaves the settings window. With "Preview" ticked it always stays.
- local owner,sticky,pinned
+ -- The preview follows the control nearest the mouse (H.NearestPreview): moving between two
+ -- buttons of the same option changes nothing, and heading for another option switches as soon as
+ -- the mouse is closer to it. Controls without a preview (profile, data) close it, and so does
+ -- leaving the settings window. It stays while a dropdown or the font list is open, and with
+ -- "Preview" ticked it never closes.
+ local pinned
+ local controls={}
  -- A list an option opened: a dropdown, or the font list (which stays open while fonts are tried).
  local function listOpen() return (DropDownList1 and DropDownList1:IsShown()) or (H.fontPicker and H.fontPicker:IsShown()) end
- -- Clicking an option (ticking a box, say) keeps its preview open after the mouse leaves, until
- -- the mouse points at another control, so the change can be seen.
- local clicked
- local function hoverPreview(frame,k)
-  frame:HookScript('OnEnter',function() if listOpen() and owner~=frame then return end;if owner~=frame then clicked=false end;owner,sticky=frame,false;set(k) end)
-  frame:HookScript('OnLeave',function() if not pinned and not sticky and not clicked and not listOpen() then owner=nil;set(nil) end end)
-  if frame.HasScript and frame:HasScript('OnClick') then
-   frame:HookScript('OnClick',function() owner,clicked=frame,true;set(k) end)
-  end
+ local function register(frame,k)
+  for _,c in ipairs(controls) do if c.frame==frame then c.kind=k;return end end
+  controls[#controls+1]={frame=frame,kind=k}
  end
- local function listClosed() if owner and kind then sticky=true end end
- if DropDownList1 and DropDownList1.HookScript then DropDownList1:HookScript('OnHide',listClosed) end
- H.SettingsListClosed=listClosed
+ local function hoverPreview(frame,k)
+  register(frame,k)
+  frame:HookScript('OnEnter',function() if not listOpen() and kind~=k then set(k) end end)
+  if frame.HasScript and frame:HasScript('OnClick') then frame:HookScript('OnClick',function() set(k) end) end
+ end
+ -- Controls with nothing to preview: pointing at them closes the preview.
+ local function noPreview(frame) register(frame,false) end
+ H.SettingsListClosed=function() end
  local scroll=body:GetParent();local panel=scroll and scroll:GetParent()
- local neutral={[body]=true}
- for _,f in ipairs({scroll,panel,InterfaceOptionsFrame,InterfaceOptionsFramePanelContainer}) do if f then neutral[f]=true end end
- local watch=CreateFrame('Frame',nil,panel or body)
- watch:SetScript('OnUpdate',function()
-  if pinned or not (sticky or clicked) or listOpen() then return end
-  local focus=GetMouseFocus and GetMouseFocus()
-  if focus==owner then sticky=false
-  elseif focus and not neutral[focus] then sticky,clicked=false,false;owner=nil;set(nil) end
+ local watch=CreateFrame('Frame',nil,panel or body);local wait=0
+ watch:SetScript('OnUpdate',function(_,elapsed)
+  wait=wait+(elapsed or 1);if wait<.05 then return end;wait=0
+  if listOpen() then return end
+  if not (panel or body):IsMouseOver() then
+   if kind and not pinned then set(nil) end
+   return
+  end
+  local k,distance=H.NearestPreview(controls)
+  if distance and distance<=24 then
+   if k then if k~=kind then set(k) end
+   elseif kind and not pinned then set(nil) end
+  end
  end)
  local function pin(on)
-  pinned=on and true or false;sticky,clicked=false,false
-  if pinned then set(kind or 'search') else owner=nil;set(nil) end
+  pinned=on and true or false
+  if pinned then set(kind or 'search') else set(nil) end
  end
- return set,hoverPreview,pin
+ return set,hoverPreview,pin,noPreview
 end
 
 -- The Personal Bests panel beside the settings window (see RefreshHUD).
@@ -620,111 +652,102 @@ function H:CreateSettingsPanel()
  self.settingsPanel=panel
  local scroll=CreateFrame('ScrollFrame','LegionKeyHistorySettingsScroll',panel,'UIPanelScrollFrameTemplate')
  scroll:SetPoint('TOPLEFT',4,-4);scroll:SetPoint('BOTTOMRIGHT',-28,4)
- local body=CreateFrame('Frame',nil,scroll);body:SetSize(560,1360);scroll:SetScrollChild(body)
+ local body=CreateFrame('Frame',nil,scroll);body:SetSize(560,1200);scroll:SetScrollChild(body)
  -- Open lists stay where they opened, so scrolling the page closes them.
  scroll:HookScript('OnVerticalScroll',function() CloseDropDownMenus();if H.fontPicker then H.fontPicker:Hide() end end)
  local y=-12
  local refreshers={}
  local function heading(text)
-  y=y-10
+  y=y-14
   local t=body:CreateFontString(nil,'ARTWORK','GameFontNormalLarge');t:SetPoint('TOPLEFT',14,y);t:SetText(text)
-  y=y-26
+  local line=body:CreateTexture(nil,'ARTWORK');line:SetPoint('TOPLEFT',14,y-22);line:SetSize(520,1)
+  line:SetTexture('Interface\\Buttons\\WHITE8X8');line:SetVertexColor(.29,.86,.78,.25)
+  y=y-30
  end
+ -- A small grey line under a heading; one short sentence at most.
  local function note(text)
-  local t=body:CreateFontString(nil,'ARTWORK','GameFontHighlightSmall');t:SetPoint('TOPLEFT',22,y);t:SetWidth(520);t:SetJustifyH('LEFT');t:SetText(text)
-  y=y-(t:GetStringHeight()>14 and 30 or 18)
+  local t=body:CreateFontString(nil,'ARTWORK','GameFontDisableSmall');t:SetPoint('TOPLEFT',22,y);t:SetWidth(520);t:SetJustifyH('LEFT');t:SetText(text)
+  y=y-18
   return t
  end
- local hoverPreview
- local function check(label,key,previewKind)
-  local cb=CreateFrame('CheckButton',nil,body,'InterfaceOptionsCheckButtonTemplate');cb:SetPoint('TOPLEFT',16,y)
+ local function subheading(text,x)
+  local t=body:CreateFontString(nil,'ARTWORK','GameFontNormalSmall');t:SetPoint('TOPLEFT',x or 22,y);t:SetText(text)
+  return t
+ end
+ local hoverPreview,noPreview
+ -- A checkbox for a setting at (x, y); the caller moves y on.
+ local function box(label,key,previewKind,x)
+  local cb=CreateFrame('CheckButton',nil,body,'InterfaceOptionsCheckButtonTemplate');cb:SetPoint('TOPLEFT',x or 16,y)
   cb.Text:SetText(label);cb.label=label
   cb:SetScript('OnClick',function(s) H.settings[key]=s:GetChecked() and true or false;H:ApplySettings() end)
   refreshers[#refreshers+1]=function() cb:SetChecked(H.settings[key]==true) end
-  if previewKind then hoverPreview(cb,previewKind) end
-  y=y-28
+  if previewKind then hoverPreview(cb,previewKind) else noPreview(cb) end
   return cb
  end
- local function choice(label,width,current,items)
-  local t=body:CreateFontString(nil,'ARTWORK','GameFontHighlight');t:SetPoint('TOPLEFT',22,y-5);t:SetText(label)
-  local b=CreateFrame('Button',nil,body,'UIPanelButtonTemplate');b:SetSize(width,22);b:SetPoint('TOPLEFT',230,y)
+ local function check(label,key,previewKind)
+  local cb=box(label,key,previewKind);y=y-26
+  return cb
+ end
+ local function choice(label,width,current,items,indent)
+  local t=body:CreateFontString(nil,'ARTWORK','GameFontHighlight');t:SetPoint('TOPLEFT',22+(indent or 0),y-5);t:SetText(label)
+  local b=CreateFrame('Button',nil,body,'UIPanelButtonTemplate');b:SetSize(width,22);b:SetPoint('TOPLEFT',200,y)
   b:SetScript('OnClick',function(s) menu(s,items()) end)
   refreshers[#refreshers+1]=function() b:SetText(current()) end
-  y=y-30
+  noPreview(b)
+  y=y-28
   return b
  end
  local function action(label,width,x,onClick)
   local b=CreateFrame('Button',nil,body,'UIPanelButtonTemplate');b:SetSize(width,22);b:SetPoint('TOPLEFT',x,y);b:SetText(label)
   b:SetScript('OnClick',onClick)
+  noPreview(b)
   return b
  end
 
  local title=body:CreateFontString(nil,'ARTWORK','GameFontNormalHuge');title:SetPoint('TOPLEFT',14,y);title:SetText('|cff4adbc8Legion Key History|r')
  local version=body:CreateFontString(nil,'ARTWORK','GameFontDisableSmall');version:SetPoint('BOTTOMLEFT',title,'BOTTOMRIGHT',8,3)
- version:SetText('v'..(GetAddOnMetadata and GetAddOnMetadata('LegionKeyHistory','Version') or '?'));y=y-34
- local preview,pinPreview;preview,hoverPreview,pinPreview=H:CreateSettingsPreview(body,refreshers);H.ShowSettingsPreview=preview
-
+ version:SetText('v'..(GetAddOnMetadata and GetAddOnMetadata('LegionKeyHistory','Version') or '?'))
+ local preview,pinPreview;preview,hoverPreview,pinPreview,noPreview=H:CreateSettingsPreview(body,refreshers);H.ShowSettingsPreview=preview
+ -- Setup: the guided tour with previews (also /lkh setup).
+ local setup=action('Run setup',100,330,function()
+  if InterfaceOptionsFrame and HideUIPanel then HideUIPanel(InterfaceOptionsFrame) end
+  if H.OpenSetup then H:OpenSetup() end
+ end)
+ setup:ClearAllPoints();setup:SetPoint('TOPLEFT',330,y-2)
  -- "Preview": keep the preview beside the settings open while browsing every section.
- local previewCheck=CreateFrame('CheckButton',nil,body,'InterfaceOptionsCheckButtonTemplate');previewCheck:SetPoint('TOPLEFT',300,y-6)
+ local previewCheck=CreateFrame('CheckButton',nil,body,'InterfaceOptionsCheckButtonTemplate');previewCheck:SetPoint('TOPLEFT',440,y-1)
  previewCheck.Text:SetText('Preview');previewCheck:SetChecked(false)
  previewCheck:SetScript('OnClick',function(s) pinPreview(s:GetChecked()) end)
  previewCheck.tooltipText='Keep the preview beside this window open. It follows the option you point at.'
- heading('General')
- local minimap=check('Show the minimap icon','minimapHidden')
- minimap:SetScript('OnClick',function(s) H.settings.minimapHidden=not s:GetChecked();H:ApplySettings() end)
- refreshers[#refreshers+1]=function() minimap:SetChecked(not H.settings.minimapHidden) end
- -- Font of the addon's windows. Automatic: ElvUI's Expressway when installed, else Arial Narrow.
- local fontChoice=choice('Font',200,function() return H.settings.font=='auto' and 'Automatic' or H.settings.font end,function() end)
- fontChoice:SetScript('OnClick',function(s) CloseDropDownMenus();fontPicker(s) end)
- hoverPreview(fontChoice,'hud')
+ y=y-30
+ note('Point at an option to see it beside this window.')
 
- heading('Scores in the game')
- -- One row per place, with separate switches for the score next to the name and the details on hover.
- local function gridHeader(text,x)
-  local t=body:CreateFontString(nil,'ARTWORK','GameFontNormalSmall');t:SetPoint('TOPLEFT',x,y);t:SetText(text)
- end
- note('Point at an option below to see it beside this window, with your settings.')
- gridHeader('Score next to name',250);gridHeader('Details on hover',390);y=y-18
- -- Pointing at a row (its name or a box) shows that place in the preview at the top.
+ -- Scores ------------------------------------------------------------------------------------
+ heading('Scores')
+ -- One row per place: the score next to the name, and the score tooltip on hover.
+ subheading('Score',268);subheading('Tooltip',402);y=y-16
  local function gridRow(label,scoreKey,hoverKey,view)
   local t=body:CreateFontString(nil,'ARTWORK','GameFontHighlight');t:SetPoint('TOPLEFT',22,y-6);t:SetText(label)
-  local zone=CreateFrame('Frame',nil,body);zone:SetPoint('TOPLEFT',18,y);zone:SetSize(260,26);zone:EnableMouse(true)
+  local zone=CreateFrame('Frame',nil,body);zone:SetPoint('TOPLEFT',18,y);zone:SetSize(240,26);zone:EnableMouse(true)
   hoverPreview(zone,view)
   for column,key in ipairs({scoreKey or false,hoverKey}) do
    if key then
-    local cb=CreateFrame('CheckButton',nil,body,'InterfaceOptionsCheckButtonTemplate');cb:SetPoint('TOPLEFT',column==1 and 290 or 425,y)
-    cb.Text:SetText('');cb.label=label..(column==1 and ': score next to name' or ': details on hover')
+    local cb=CreateFrame('CheckButton',nil,body,'InterfaceOptionsCheckButtonTemplate');cb:SetPoint('TOPLEFT',column==1 and 270 or 405,y)
+    cb.Text:SetText('');cb.label=label..(column==1 and ': score' or ': tooltip')
     cb:SetScript('OnClick',function(s) H.settings[key]=s:GetChecked() and true or false;H:ApplySettings() end)
     hoverPreview(cb,view)
     refreshers[#refreshers+1]=function() cb:SetChecked(H.settings[key]==true) end
    end
   end
-  y=y-28
+  y=y-26
  end
  gridRow('Friends list','scoreFriends','hoverFriends','friends')
  gridRow('Group finder applicants','scoreApplicants','hoverApplicants','applicants')
  gridRow('Group finder search results',nil,'hoverSearch','search')
- gridRow('Player tooltip (world and unit frames)',nil,'hoverUnit','unit')
-
- heading('How scores look')
- -- Group finder list: how each group's rows read (shown in the preview at the top).
- local listChoice=choice('Group finder list',200,function() return SEARCH_STYLES[H.settings.searchStyle] or SEARCH_STYLES.leaderTop end,function()
-  local items={}
-  for _,key in ipairs({'leaderTop','dungeonTop','plain'}) do
-   items[#items+1]={text=SEARCH_STYLES[key],checked=H.settings.searchStyle==key,func=function() H.settings.searchStyle=key;H:ApplySettings() end}
-  end
-  return items
- end)
- hoverPreview(listChoice,'search')
- local keyChoice=choice('Player tooltip score',150,function() return MODIFIERS[H.settings.hoverModifier] or MODIFIERS.always end,function()
-  local items={}
-  for _,key in ipairs({'always','ctrl','alt','shift'}) do
-   items[#items+1]={text=MODIFIERS[key],checked=H.settings.hoverModifier==key,func=function() H.settings.hoverModifier=key;H:ApplySettings() end}
-  end
-  return items
- end)
+ gridRow('Players (world and unit frames)',nil,'hoverUnit','unit')
+ y=y-8
  local styles={{false,true},{true,true},{false,false},{true,false}}
- local styleChoice=choice('Score style',150,function() return H:FormatScore(1674.34) end,function()
+ local styleChoice=choice('Style',150,function() return H:FormatScore(1674.34) end,function()
   local items={}
   for _,style in ipairs(styles) do
    local decimals,suffix=style[1],style[2]
@@ -735,20 +758,20 @@ function H:CreateSettingsPanel()
   return items
  end)
  hoverPreview(styleChoice,'look')
- -- Colour of the score next to names (friends list, applicants, search results).
- local colorChoice=choice('Score colour',150,function() return COLOR_MODES[H.settings.scoreColorMode] or COLOR_MODES.rio end,function()
+ -- Colour of the score next to names: Raider.IO-style bands from this leaderboard, or one colour.
+ local colorChoice=choice('Colour',150,function() return COLOR_MODES[H.settings.scoreColorMode] or COLOR_MODES.rio end,function()
   local items={}
-  for _,key in ipairs({'custom','rio'}) do
+  for _,key in ipairs({'rio','custom'}) do
    items[#items+1]={text=COLOR_MODES[key],checked=H.settings.scoreColorMode==key,func=function() H.settings.scoreColorMode=key;H:ApplySettings() end}
   end
   return items
  end)
  hoverPreview(colorChoice,'look')
- local swatch=CreateFrame('Button',nil,body);swatch:SetSize(22,22);swatch:SetPoint('TOPLEFT',230,y);hoverPreview(swatch,'look')
+ local swatch=CreateFrame('Button',nil,body);swatch:SetSize(22,22);swatch:SetPoint('TOPLEFT',200,y);hoverPreview(swatch,'look')
  swatch.texture=swatch:CreateTexture(nil,'ARTWORK');swatch.texture:SetAllPoints(swatch);swatch.texture:SetTexture('Interface\\Buttons\\WHITE8X8')
- local sample=body:CreateFontString(nil,'ARTWORK','GameFontNormal');sample:SetPoint('TOPLEFT',262,y-4)
- -- Raider.IO modes: a preview of the colour bands on this leaderboard instead of the picker.
- local bands=body:CreateFontString(nil,'ARTWORK','GameFontNormal');bands:SetPoint('TOPLEFT',230,y-4)
+ local sample=body:CreateFontString(nil,'ARTWORK','GameFontNormal');sample:SetPoint('TOPLEFT',232,y-4)
+ -- Raider.IO style: the colour bands on this leaderboard instead of the picker.
+ local bands=body:CreateFontString(nil,'ARTWORK','GameFontNormal');bands:SetPoint('TOPLEFT',200,y-4)
  refreshers[#refreshers+1]=function()
   local custom=H.settings.scoreColorMode=='custom' or not H:ScoreTiers()
   swatch:SetShown(custom);sample:SetShown(custom);bands:SetShown(not custom)
@@ -770,48 +793,71 @@ function H:CreateSettingsPanel()
   ColorPickerFrame.func=apply;ColorPickerFrame.cancelFunc=apply
   ColorPickerFrame:SetColorRGB(r,g,b);ColorPickerFrame:Hide();ColorPickerFrame:Show()
  end)
- H.defaultColorButton=action('Default colour',110,340,function() H.settings.scoreColor=nil;H:ApplySettings() end)
- y=y-32
+ H.defaultColorButton=action('Default colour',110,310,function() H.settings.scoreColor=nil;H:ApplySettings() end)
+ y=y-30
+ local listChoice=choice('Group finder list',220,function() return SEARCH_STYLES[H.settings.searchStyle] or SEARCH_STYLES.leaderTop end,function()
+  local items={}
+  for _,key in ipairs({'leaderTop','dungeonTop','plain'}) do
+   items[#items+1]={text=SEARCH_STYLES[key],checked=H.settings.searchStyle==key,func=function() H.settings.searchStyle=key;H:ApplySettings() end}
+  end
+  return items
+ end)
+ hoverPreview(listChoice,'search')
+ local keyChoice=choice('Player tooltip',150,function() return MODIFIERS[H.settings.hoverModifier] or MODIFIERS.always end,function()
+  local items={}
+  for _,key in ipairs({'always','ctrl','alt','shift'}) do
+   items[#items+1]={text=MODIFIERS[key],checked=H.settings.hoverModifier==key,func=function() H.settings.hoverModifier=key;H:ApplySettings() end}
+  end
+  return items
+ end)
+ hoverPreview(keyChoice,'unit')
 
- heading('Score tooltip shows')
- note('Point at an option to see your own tooltip beside this window.')
- check('Overall, spec and class rank','tipRanks','tooltip')
+ -- Tooltip -----------------------------------------------------------------------------------
+ heading('Tooltip')
+ note('What the score tooltip shows. Point at one to see your own.')
+ check('Ranks: overall, spec and class','tipRanks','tooltip')
  check('Best run','tipBestRun','tooltip')
- check('Timed +10-14, +15-19 and +20+ runs','tipTimedRuns','tooltip')
- check('Best key per dungeon','tipDungeons','tooltip')
- check('Best Fortified / Tyrannical key per dungeon (instead of time and score)','tipWeekSplit','tooltip')
+ check('Timed runs by level (+10, +15, +20)','tipTimedRuns','tooltip')
+ check('Best key in each dungeon','tipDungeons','tooltip')
+ check('Best key split by Fortified / Tyrannical','tipWeekSplit','tooltip')
 
- heading('Personal Bests')
- note('Point at an option to see the panel beside this window.')
- check('Show next to Mythic Dungeons in the Dungeon Finder','hud','hud')
+ -- Friends in keys ---------------------------------------------------------------------------
+ heading('Friends in keys')
+ note('Friends and guildmates with LKH show their key live. /lkh keytest tries it on a friend.')
+ check('Share my key with friends, guild and group','shareKeyStatus','friendkeys')
+ check('Their key in the friends list tooltip','friendKeyStatus','friendkeys')
+ check('Their key in place of their zone ("Maw of Souls +11")','friendKeyList','friendkeys')
+
+ -- Windows -----------------------------------------------------------------------------------
+ heading('Windows')
+ box('Party keys in dungeons','partyKeys')
+ action('Move',70,330,function() H:TogglePartyKeysLock() end)
+ action('Preview',70,405,function() H:PreviewPartyKeys() end)
+ y=y-26
+ box('Personal Bests beside the Dungeon Finder','hud','hud')
+ y=y-26
+ -- Its records and rank columns, on one line each.
  local records=choice('Records',150,function() return H.settings.bestMode=='completed' and 'Highest completed' or 'Best timed' end,function()
   return {{text='Best timed',checked=H.settings.bestMode~='completed',func=function() H.settings.bestMode='timed';H:ApplySettings() end},
    {text='Highest completed',checked=H.settings.bestMode=='completed',func=function() H.settings.bestMode='completed';H:ApplySettings() end}}
- end)
+ end,26)
  hoverPreview(records,'hud')
- check('Overall rank column','hudOverall','hud')
- check('Spec rank column','hudSpec','hud')
- check('Class rank column','hudClass','hud')
- check('Role rank column','hudRole','hud')
+ local columns=body:CreateFontString(nil,'ARTWORK','GameFontHighlight');columns:SetPoint('TOPLEFT',48,y-6);columns:SetText('Rank columns')
+ for i,c in ipairs({{'Overall','hudOverall'},{'Spec','hudSpec'},{'Class','hudClass'},{'Role','hudRole'}}) do box(c[1],c[2],'hud',196+(i-1)*80) end
+ y=y-30
+ local minimap=check('Minimap icon','minimapHidden')
+ minimap:SetScript('OnClick',function(s) H.settings.minimapHidden=not s:GetChecked();H:ApplySettings() end)
+ refreshers[#refreshers+1]=function() minimap:SetChecked(not H.settings.minimapHidden) end
+ -- Font of the addon's windows. Automatic: ElvUI's Expressway when installed, else Arial Narrow.
+ local fontChoice=choice('Font',200,function() return H.settings.font=='auto' and 'Automatic' or H.settings.font end,function() end)
+ fontChoice:SetScript('OnClick',function(s) CloseDropDownMenus();fontPicker(s) end)
+ hoverPreview(fontChoice,'hud')
+ action('Open your group (/lkh party)',200,22,function() H:OpenParty() end);y=y-30
 
- heading('Friends in keys')
- note('Friends and guildmates who also use LKH tell you live whether they are in a key. Point at an option to see it; /lkh keytest shows it on a real friend.')
- check('Share whether I am in a key with friends, guild and group','shareKeyStatus','friendkeys')
- check('Show their key in the friends list tooltip (timer, bosses, forces, deaths)','friendKeyStatus','friendkeys')
- check('Show their key instead of the zone in the friends list ("Maw of Souls +11")','friendKeyList','friendkeys')
-
- heading('Party keys')
- note('Inside a dungeon, a small window lists the keystone each group member has; keys for the dungeon you are in are on top, in green. Group members with LKH send theirs; keystones linked in party chat (!keys) count too.')
- check('Show the party keys window in dungeons','partyKeys')
- action('Move it',90,28,function() H:TogglePartyKeysLock() end);y=y-32
-
- heading('Your group')
- note('Everyone in your group side by side: score, ranks, best key per dungeon and timed keys. Also /lkh party.')
- action('Open the group window',170,28,function() H:OpenParty() end);y=y-32
-
+ -- Profile -----------------------------------------------------------------------------------
  heading('Profile')
- note('Every character uses the account-wide Default profile unless you pick another one here.')
- choice('Profile for this character',190,function() return H.profileName end,function()
+ note('Every character uses Default unless you pick another profile here.')
+ choice('This character uses',190,function() return H.profileName end,function()
   local items={}
   for _,name in ipairs(H:ProfileNames()) do items[#items+1]={text=name,checked=name==H.profileName,func=function() H:UseProfile(name) end} end
   return items
@@ -825,7 +871,7 @@ function H:CreateSettingsPanel()
   if H.profileName=='Default' then H.Message('The Default profile cannot be deleted.');return end
   local name=H.profileName;confirm('Delete the profile "'..name..'"?',function() H:DeleteProfile(name) end)
  end)
- y=y-32
+ y=y-30
  action('Copy from character',150,22,function(s)
   local items={}
   for _,entry in ipairs(H:ProfileCharacters()) do
@@ -839,8 +885,8 @@ function H:CreateSettingsPanel()
  action('Reset to defaults',130,182,function()
   confirm('Reset the "'..H.profileName..'" profile to the default settings?',function() H:ResetProfile() end)
  end)
- y=y-32
- note('Export copies your settings as a line of text you can send to a friend. Paste one into the box and click Import to use it.')
+ y=y-34
+ subheading('Share settings: Export, send the text to a friend, they paste it and click Import.');y=y-18
  local share=CreateFrame('EditBox',nil,body,'InputBoxTemplate');share:SetSize(330,22);share:SetPoint('TOPLEFT',28,y);share:SetAutoFocus(false)
  share:SetScript('OnEscapePressed',function(s) s:ClearFocus() end)
  action('Export',70,370,function() share:SetText(H:ExportSettings());share:SetFocus();share:HighlightText() end)
@@ -848,18 +894,20 @@ function H:CreateSettingsPanel()
   local count,why=H:ImportSettings(share:GetText())
   if count then H.Message('Imported '..count..' settings into the "'..H.profileName..'" profile.');share:SetText('') else H.Message(why) end
  end)
- y=y-36
+ y=y-30
 
+ -- Data --------------------------------------------------------------------------------------
  heading('Data')
- action('Import from file',150,22,function() H:ImportSnapshot() end)
- local fileDate=body:CreateFontString(nil,'ARTWORK','GameFontHighlightSmall');fileDate:SetPoint('TOPLEFT',184,y-5)
+ local fileDate=note('')
  refreshers[#refreshers+1]=function()
   local data=LegionKeyHistoryLeaderboard
-  fileDate:SetText(data and data.downloaded and ('Leaderboard file from '..data.downloaded) or 'No leaderboard file loaded')
+  fileDate:SetText(data and data.downloaded and ('Leaderboard file from '..data.downloaded..(H.DownloadedAgo and H:DownloadedAgo(data.downloaded) or '')) or 'No leaderboard file loaded')
  end
- y=y-24
- note('Adds the runs in the leaderboard file that your current character played in. Runs you already have are skipped.')
- action('Clear history for a character',190,22,function(s)
+ local import=action('Import from file',150,22,function() H:ImportSnapshot() end)
+ import.tooltipText='Adds the runs in the leaderboard file that this character played in. Runs you already have are skipped.'
+ import:HookScript('OnEnter',function(s) GameTooltip:SetOwner(s,'ANCHOR_RIGHT');GameTooltip:SetText(s.tooltipText,1,1,1,1,true);GameTooltip:Show() end)
+ import:HookScript('OnLeave',function() GameTooltip:Hide() end)
+ action('Clear history for a character',190,182,function(s)
   local items={}
   for _,entry in ipairs(H:HistoryCharacters()) do
    items[#items+1]={text=entry.key..'  ('..entry.count..' runs)',notCheckable=true,func=function()
@@ -871,7 +919,7 @@ function H:CreateSettingsPanel()
   if #items==0 then items[1]={text='No recorded runs',notCheckable=true,disabled=true} end
   menu(s,items)
  end)
- action('Delete duplicate runs',150,222,function()
+ action('Delete duplicate runs',150,382,function()
   local removed=H:DeleteDuplicateRuns()
   H.Message(removed>0 and ('Deleted '..removed..' duplicate runs.') or 'No duplicate runs found.')
  end)

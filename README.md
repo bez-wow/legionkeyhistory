@@ -11,8 +11,9 @@ Tauri and Warriors of Darkness), right in the game, plus a journal of every key 
 2. **Open** `Interface\AddOns\LegionKeyHistory\LKH Updater.cmd` and **press 2**.
 
 That's it. The leaderboard now updates every hour in the background, and new addon versions
-install by themselves (only while WoW is closed). Your keys already on the leaderboard are added
-to your journal the first time you log in.
+install by themselves (only while WoW is closed). The first time you log in, a short setup walks
+you through the options with live previews, and your keys already on the leaderboard are added
+to your journal.
 
 > Use the download link above, not GitHub's green "Code" button: that zip has the wrong folder name.
 > On Mac or Linux, see [below](#mac-and-linux).
@@ -54,6 +55,7 @@ leaderboard is on [the website](https://tauriachievements.github.io/mythic-plus?
 | `/lkh party` | your group |
 | `/lkh keys` | move the party keys window (`/lkh keystest` to preview it) |
 | `/lkh config` | settings |
+| `/lkh setup` | the setup again |
 
 ## Mac and Linux
 

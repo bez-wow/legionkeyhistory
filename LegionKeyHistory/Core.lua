@@ -2,8 +2,13 @@ local H=LegionKeyHistory
 local function message(text) print('|cff4adbc8Legion Key History:|r '..text) end
 H.Message=message
 function H:InitializeDB()
+ -- No saved data yet: a fresh install, so setup opens after login (Setup.lua). Players updating
+ -- from a version before setup existed are marked done and never see it by itself.
+ local fresh=LegionKeyHistoryDB==nil
  LegionKeyHistoryDB=LegionKeyHistoryDB or {version=1,runs={}}
  self.db=LegionKeyHistoryDB; self.db.runs=self.db.runs or {}
+ if self.db.setupDone==nil then self.db.setupDone=not fresh end
+ if self.SettleFeatureNotes then self:SettleFeatureNotes(fresh) end
  self:InitializeProfiles()
  self.accountView=false
  self:RepairHistory()
@@ -163,7 +168,12 @@ for _,event in ipairs({'ADDON_LOADED','PLAYER_LOGIN','PLAYER_ENTERING_WORLD','CH
 events:SetScript('OnEvent',function(_,event,arg)
  if event=='ADDON_LOADED' and arg=='LegionKeyHistory' then H:InitializeDB()
  elseif not H.db then return
- elseif event=='PLAYER_LOGIN' then H:InitializeProfiles();H:CreateUI();H:CreateSettingsPanel();C_Timer.After(8,function() H:CheckAddonVersion() end); if C_ChallengeMode.RequestMapInfo then C_ChallengeMode.RequestMapInfo() end
+ elseif event=='PLAYER_LOGIN' then
+  -- Once per session: Tauri can fire PLAYER_LOGIN again when entering an instance, which repeated
+  -- the new-version line in chat every time.
+  if H.loggedIn then return end
+  H.loggedIn=true
+  H:InitializeProfiles();H:CreateUI();H:CreateSettingsPanel();C_Timer.After(8,function() H:CheckAddonVersion() end);C_Timer.After(5,function() if H.MaybeOpenSetup then H:MaybeOpenSetup() end end); if C_ChallengeMode.RequestMapInfo then C_ChallengeMode.RequestMapInfo() end
  elseif event=='CHALLENGE_MODE_START' then C_Timer.After(0.5,function() H:BeginRun(false) end)
  elseif event=='PLAYER_ENTERING_WORLD' then C_Timer.After(2,function() if C_ChallengeMode.IsChallengeModeActive() then H:BeginRun(true) end end)
  elseif event=='CHALLENGE_MODE_COMPLETED' then H:CompleteRun(0)
@@ -182,6 +192,11 @@ SlashCmdList.LEGIONKEYHISTORY=function(msg)
  elseif msg=='party' or msg=='group' then H:OpenParty()
  elseif msg=='keytest' then H:FakeKeyStatus()
  elseif msg=='keys' then H:TogglePartyKeysLock()
+ elseif msg=='setup' then H:OpenSetup()
+ elseif msg=='new' then
+  -- The "new feature" notes again, the next time each feature shows.
+  H.db.seenFeatures={};H.Message('New-feature notes reset: each shows again the next time its feature appears.')
+  if H.RefreshPartyKeys then H:RefreshPartyKeys() end
  elseif msg=='keystest' then H:PreviewPartyKeys()
  elseif msg=='later' then H.settings.showLaterDungeons=not H.settings.showLaterDungeons;H:Refresh()
  elseif msg=='import' then H:ImportSnapshot()

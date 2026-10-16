@@ -243,7 +243,7 @@ function H:RefreshHUD()
  end
  self.hud:SetHeight(144+visibleRows*37)
  -- While a Personal Bests option is pointed at in the settings, the panel shows beside them.
- local options=self.hudPreview and InterfaceOptionsFrame
+ local options=self.hudPreview and (self.previewAnchor or InterfaceOptionsFrame)
  self.hud:ClearAllPoints()
  if options then self.hud:SetPoint('TOPLEFT',options,'TOPRIGHT',6,0);self.hud:SetFrameStrata('DIALOG')
  else self.hud:SetFrameStrata('MEDIUM');if PVEFrame then self.hud:SetPoint('TOPLEFT',PVEFrame,'TOPRIGHT',8,0) end end
