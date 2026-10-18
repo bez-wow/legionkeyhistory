@@ -13,6 +13,8 @@ set "TASK=LKH Leaderboard Update"
 if defined LKH_TASK set "TASK=%LKH_TASK%"
 rem Present when the hourly task also installs new addon versions (read by update.ps1 -Auto).
 set "AUTOADDON=%~dp0auto-addon.txt"
+rem Present when finished keys are NOT shared with Keystone Tauri (read by update.ps1).
+set "NOUPLOAD=%~dp0no-upload.txt"
 
 if not exist "%~dp0LegionKeyHistory.toc" (
   echo This file must stay inside the LegionKeyHistory addon folder:
@@ -35,6 +37,7 @@ echo.
 schtasks /Query /TN "%TASK%" >nul 2>&1 && (
   if exist "%AUTOADDON%" (echo  Hourly update: leaderboard and addon) else (echo  Hourly update: leaderboard only)
 ) || (echo  Hourly update: not installed)
+if exist "%NOUPLOAD%" (echo  Talents on Keystone Tauri: not shared) else (echo  Talents on Keystone Tauri: your finished keys are shared with each update)
 call :writable || (echo  Note: Windows protects this folder - close this and run it as administrator.)
 echo.
 echo   1. Hourly update: leaderboard only
@@ -42,10 +45,12 @@ echo   2. Hourly update: leaderboard and addon (new versions install by themselv
 echo   3. Update the addon to the newest version now
 echo   4. Update the leaderboard now
 echo   5. Turn off the hourly update
-echo   6. Exit
+if exist "%NOUPLOAD%" (echo   6. Share my keys and the group's talents with Keystone Tauri) else (echo   6. Stop sharing my keys with Keystone Tauri)
+echo   7. Exit
 echo.
-choice /C 123456 /N /M " Choose 1-6: "
-if errorlevel 6 exit /b 0
+choice /C 1234567 /N /M " Choose 1-7: "
+if errorlevel 7 exit /b 0
+if errorlevel 6 (call :sharing & pause & goto menu)
 if errorlevel 5 (call :uninstall & pause & goto menu)
 if errorlevel 4 (call :update & pause & goto menu)
 if errorlevel 3 goto addon
@@ -121,6 +126,21 @@ if errorlevel 1 (
 )
 schtasks /Delete /TN "%TASK%" /F >nul
 echo Turned off. The leaderboard file you have stays; it just no longer updates by itself.
+exit /b 0
+
+rem Keystone Tauri (keystone-tauri.vercel.app) shows each leaderboard run with the talents the group
+rem used. update.ps1 sends it the keys you finish, as the addon saved them, unless this is turned off.
+:sharing
+echo.
+if exist "%NOUPLOAD%" (
+  del "%NOUPLOAD%" >nul 2>&1
+  echo Sharing is on. Each update sends the keys you finish, with the group's talents, to
+  echo Keystone Tauri, which checks them against the Tauri leaderboard and shows the talents
+  echo next to the run.
+) else (
+  echo Not shared with Keystone Tauri> "%NOUPLOAD%"
+  echo Sharing is off. Your keys stay on this computer.
+)
 exit /b 0
 
 :writable

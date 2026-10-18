@@ -8,6 +8,7 @@
 Metadata.lua
 ImportedRuns.lua
 Core.lua
+Talents.lua
 UI.lua
 LeaderboardData.lua
 Leaderboard.lua

@@ -41,6 +41,11 @@ to your journal.
 - **Your group** (`/lkh party`): everyone's score and best keys side by side.
 - **Journal** (`/lkh`): every key you finish, with your group, affixes and time, and stats on
   your favourite dungeons and the people you play with.
+- **Talents in every key:** when a key starts, LKH saves each group member's spec and talents
+  (group members with LKH send theirs; the others are inspected). The updater shares your finished
+  keys with [Keystone Tauri](https://keystone-tauri.vercel.app), which checks them against the Tauri
+  leaderboard, and [the website](https://tauriachievements.github.io/mythic-plus) shows the talents
+  in each run's details. To stop sharing, run `LKH Updater.cmd` and press **6**.
 
 Scores are unofficial: the sum of each character's best run per dungeon, with the
 [Tauri Achievements](https://tauriachievements.github.io/mythic-plus/scoring) formula. The same
