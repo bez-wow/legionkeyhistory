@@ -16,24 +16,60 @@ function H:SameSnapshotRun(a,b)
  local matched=0;for _,m in ipairs(b.members or {}) do if names[self:ScoreKey(m.name)] then matched=matched+1 end end
  return matched>=3
 end
+-- The run history ("map|level|ms|stamp|[score|]affixes|party" per line) is read in place: a
+-- match anchored at a line's start, instead of copying every line of the 3-4 MB text.
+-- Returns map, level, ms, stamp, affixes, party, the position of the line's end, and the score.
+local function fieldsAt(s,init)
+ local map,level,ms,stamp,a,b,stop=s:match('^(%d+)|(%d+)|(%d+)|(%d+)|([^|\n]*)|([^|\n]*)()',init)
+ local score,aff,party
+ if map and s:byte(stop)==124 then
+  if a:find('^[%d.]+$') then score,aff=a,b;party,stop=s:match('^|([^|\n]*)()',stop) else map=nil end
+ elseif map then aff,party=a,b end
+ if not map or (stop<=#s and s:byte(stop)~=10) then return nil,nil,nil,nil,nil,nil,s:find('\n',init,true) or #s+1 end
+ return map,level,ms,stamp,aff,party,stop,score
+end
+H.HistoryFieldsAt=fieldsAt
+-- Calls fn(lineStart) for each history line with this leaderboard row in its group. Rosters are
+-- the only "row:spec" pairs on a line, so one plain search for "row:" finds them; a hit only
+-- counts after "|" or "," (not "177:" for row 77).
+local function eachRowLine(s,row,fn)
+ local needle=row..':';local byte=string.byte;local init=1
+ while true do
+  local pos=s:find(needle,init,true);if not pos then return end
+  local before=byte(s,pos-1)
+  if before==124 or before==44 then
+   local start=pos;while start>1 and byte(s,start-1)~=10 do start=start-1 end
+   fn(start)
+   init=s:find('\n',pos,true) or #s+1
+  else init=pos+1 end
+ end
+end
 -- rows (optional): only runs with one of these leaderboard rows in the group. Rosters are the
 -- only "row:spec" pairs on a line, so a plain search skips other runs without parsing them.
 function H:SnapshotRuns(data,rows)
  return coroutine.wrap(function()
   if data.historyText then
-   for line in data.historyText:gmatch('[^\n]+') do
-    local wanted=not rows
-    for _,row in ipairs(rows or {}) do if line:find('[|,]'..row..':') then wanted=true;break end end
-    local map,level,ms,stamp,score,aff,party
-    if wanted then map,level,ms,stamp,score,aff,party=line:match('^(%d+)|(%d+)|(%d+)|(%d+)|([%d.]+)|([^|]*)|([^|]*)$') end
-    if wanted and not map then map,level,ms,stamp,aff,party=line:match('^(%d+)|(%d+)|(%d+)|(%d+)|([^|]*)|([^|]*)$') end
+   local s=data.historyText
+   local function yieldRun(init)
+    local map,level,ms,stamp,aff,party,stop,score=fieldsAt(s,init)
     if map then
      local roster,affixes={},{}
      if data.names then for row,spec in party:gmatch('(%d+):?(%d*)') do roster[#roster+1]={tonumber(row),tonumber(spec)} end
-     else for p,s in party:gmatch('(%d+):(%d+)') do roster[#roster+1]={tonumber(p)+1} end end
+     else for p in party:gmatch('(%d+):(%d+)') do roster[#roster+1]={tonumber(p)+1} end end
      for a in aff:gmatch('%d+') do affixes[#affixes+1]=tonumber(a) end
      coroutine.yield(data.historyMaps[tonumber(map)],{tonumber(level),tonumber(ms),tonumber(stamp),tonumber(score or 0),affixes,roster})
     end
+    return stop
+   end
+   if rows then
+    -- Only these rows' lines, found by search, in file order.
+    local starts,seen={},{}
+    for _,row in ipairs(rows) do eachRowLine(s,row,function(start) if not seen[start] then seen[start]=true;starts[#starts+1]=start end end) end
+    table.sort(starts)
+    for _,start in ipairs(starts) do yieldRun(start) end
+   else
+    local init=1
+    while init<=#s do init=yieldRun(init)+1 end
    end
   else
    for _,d in ipairs(data.history or {}) do for _,r in ipairs(d.runs) do
@@ -152,6 +188,7 @@ function H:LeaderboardPlayer(row)
  for spec,score,rank,packed in specs:gmatch('#([^=#]+)=([%d.]+):(%d+):([^#]*)') do
   p.specs[spec]={score=tonumber(score),rank=tonumber(rank),best=packed=='*' and p.best or decodeBest(packed,data.dungeons or {})}
  end
+ if data.statsPacked then p.packedStats=specs:match('#~([^#]*)$') or '' end
  cache[row]=p
  return p
 end
@@ -1050,6 +1087,7 @@ function H:CreateLeaderboard()
  f:SetBackdrop(backdrop);f:SetBackdropColor(.025,.035,.05,1);f:SetBackdropBorderColor(.17,.30,.34);f:EnableMouse(true)
  f:SetMovable(true);f:RegisterForDrag('LeftButton');f:SetScript('OnDragStart',f.StartMoving);f:SetScript('OnDragStop',f.StopMovingOrSizing)
  table.insert(UISpecialFrames,'LegionKeyHistoryLeaderboardFrame')
+ f:HookScript('OnHide',function() H:DropRunCaches() end)
  f.title=text(f,23,22,-18,650,'|cff4adbc8MYTHIC+|r  Player leaderboard')
  button(f,'Your runs',95,875,-20,function() f:Hide();H:OpenJournal() end)
  button(f,'X',24,994,-20,function() f:Hide() end)
@@ -1288,8 +1326,14 @@ local function weekType(data,stamp,aff)
  if aff:match('^%d+,%d+,%d+$') then return typeOf(aff) end
  local weeks=data.weekSegments
  if not weeks then
-  local full={}
-  for t,set in data.historyText:gmatch('|(%d+)|(%d+,%d+,%d+)|') do full[#full+1]={tonumber(t),set} end
+  -- Only the +10 runs (three affixes) are copied out of the text.
+  local full={};local s,init=data.historyText,1
+  while init<=#s do
+   local stamp,set=s:match('^%d+|%d+|%d+|(%d+)|(%d+,%d+,%d+)|',init)
+   if not stamp then stamp,set=s:match('^%d+|%d+|%d+|(%d+)|[%d.]+|(%d+,%d+,%d+)|',init) end
+   if stamp then full[#full+1]={tonumber(stamp),set} end
+   init=(s:find('\n',init,true) or #s)+1
+  end
   table.sort(full,function(a,b) return a[1]<b[1] end)
   weeks={}
   for _,r in ipairs(full) do
@@ -1307,95 +1351,150 @@ local function weekType(data,stamp,aff)
  end
  return weeks[#weeks] and typeOf(weeks[#weeks].set)
 end
--- Calls fn(map,level,ms,stamp,aff) for each history run a player (PlayerScore record) was in.
--- Only the lines naming the player are read: the party field is "row:spec,row:spec", so "|row:"
--- or ",row:" finds them without walking every run.
-local function eachPlayerRun(p,fn)
- local data=LegionKeyHistoryLeaderboard;local row=p.row or p.rank
- local s=data and data.historyText;if not s or not row or p.partial then return end
- for _,needle in ipairs({'|'..row..':',','..row..':'}) do
-  local init=1
-  while true do
-   local pos=s:find(needle,init,true);if not pos then break end
-   local from=math.max(1,pos-300);local before=s:sub(from,pos):match('.*()\n')
-   local stop=s:find('\n',pos,true)
-   local line=s:sub(before and from+before or 1,(stop or #s+1)-1);init=(stop or #s)+1
-   local map,level,ms,stamp,aff=historyFields(line)
-   if map then fn(tonumber(map),tonumber(level),tonumber(ms),tonumber(stamp),aff) end
-  end
- end
-end
--- Chests of a player's best Fortified and Tyrannical run per dungeon slot, from the file's run
--- history (the file's Fortified / Tyrannical field holds only the key level).
--- Result: [slot]={fort=run,tyr=run}, run={level,upgrades}.
-function H:WeekUpgrades(p)
- if p.weekUpgrades then return p.weekUpgrades end
- local result={};p.weekUpgrades=result
- local data=LegionKeyHistoryLeaderboard
- eachPlayerRun(p,function(slot,level,ms,stamp,aff)
-  local week=weekType(data,stamp,aff)
-  if not week then return end
-  local timer=(data.historyMaps[slot] or {}).timer
-  local seconds=ms/1000;local score=runScore(level,seconds,timer)
-  local runs=result[slot] or {};result[slot]=runs;local old=runs[week]
-  if not old or score>old.score or (score==old.score and seconds<old.seconds) then
-   runs[week]={score=score,seconds=seconds,level=level,upgrades=self:KeyUpgrades(seconds,timer)}
-  end
+-- Calls fn(map,level,ms,stamp,aff,lineStart) for each history run a leaderboard row was in.
+local function eachRowRun(row,fn)
+ local data=LegionKeyHistoryLeaderboard;local s=data and data.historyText
+ if not s or not row then return end
+ eachRowLine(s,row,function(start)
+  local map,level,ms,stamp,aff=fieldsAt(s,start)
+  if map then fn(tonumber(map),tonumber(level),tonumber(ms),tonumber(stamp),aff,start) end
  end)
- return result
 end
--- How many keys a player timed at +10 to +14, +15 to +19 and +20 and above, from the file's run history.
-function H:TimedCounts(p)
- if p.timedCounts then return p.timedCounts end
- local counts={low=0,high=0,top=0};p.timedCounts=counts
+-- One pass over a player's (PlayerScore record) runs for both tooltip sections:
+-- weekUpgrades, the chests of their best Fortified and Tyrannical run per dungeon slot
+-- ([slot]={fort=run,tyr=run}, run={level,upgrades}; the file's Fortified / Tyrannical field holds
+-- only the key level), and timedCounts, the keys timed at +10 to +14, +15 to +19 and +20 and above.
+local function playerRunStats(p)
+ if p.weekUpgrades then return end
+ local weeks,counts={},{low=0,high=0,top=0};p.weekUpgrades,p.timedCounts=weeks,counts
+ if p.partial then return end
  local data=LegionKeyHistoryLeaderboard
- eachPlayerRun(p,function(slot,level,ms)
+ if p.packedStats then
+  -- "low,high,top;ups": ups has two digits per dungeon slot, the chests of the best Fortified
+  -- and Tyrannical run (the ones in weekBest); missing digits are 0.
+  local low,high,top,ups=p.packedStats:match('^(%d+),(%d+),(%d+);(%d*)$')
+  counts.low,counts.high,counts.top=tonumber(low) or 0,tonumber(high) or 0,tonumber(top) or 0
+  ups=ups or ''
+  for j,d in ipairs(data.dungeons or {}) do
+   local w=p.weekBest and p.weekBest[d.id]
+   if w then
+    local function run(value,digit) return value and {level=math.abs(value),upgrades=tonumber(ups:sub(digit,digit)) or 0} or nil end
+    weeks[j]={fort=run(w.fort,2*j-1),tyr=run(w.tyr,2*j)}
+   end
+  end
+  return
+ end
+ eachRowRun(p.row or p.rank,function(slot,level,ms,stamp,aff)
   local timer=(data.historyMaps[slot] or {}).timer
   if level>=10 and timer and ms<=timer*1000 then
    local range=level>=20 and 'top' or level>=15 and 'high' or 'low'
    counts[range]=counts[range]+1
   end
+  local week=weekType(data,stamp,aff)
+  if not week then return end
+  local seconds=ms/1000;local score=runScore(level,seconds,timer)
+  local runs=weeks[slot] or {};weeks[slot]=runs;local old=runs[week]
+  if not old or score>old.score or (score==old.score and seconds<old.seconds) then
+   runs[week]={score=score,seconds=seconds,level=level,upgrades=H:KeyUpgrades(seconds,timer)}
+  end
  end)
- return counts
 end
--- Every run in the file ranked by run score (best first; the earlier run wins a tie), for all
--- dungeons (slot nil) or one. Entries are {line,score,stamp,rank}; runs are built per page.
--- Kept once per file, along with each run's season rank for the players' run lists.
+function H:WeekUpgrades(p) playerRunStats(p);return p.weekUpgrades end
+function H:TimedCounts(p) playerRunStats(p);return p.timedCounts end
+-- Every history run, numbered in file order: where its line starts and its dungeon slot. Flat
+-- number lists, once per file (a table per run took over 20 MB). Files sorted by run score
+-- (historyOrder "score") need nothing more for the ranking: run n is rank n.
+function H:RunIndex()
+ local data=LegionKeyHistoryLeaderboard;if not data or not data.historyText then return nil end
+ if data.runIndex then return data.runIndex end
+ local s=data.historyText;local starts,slots={},{}
+ local init,n=1,0
+ while init<=#s do
+  -- The map field is a short number; Lua keeps one copy of each, so this allocates nothing per run.
+  local map,after=s:match('^(%d+)|()',init)
+  if map then n=n+1;starts[n],slots[n]=init,tonumber(map) end
+  init=(s:find('\n',after or init,true) or #s)+1
+ end
+ data.runIndex={starts=starts,slots=slots,count=n}
+ return data.runIndex
+end
+-- Run end times (and run scores, with scores=true) by run number, added to the index once.
+local function indexTimes(idx,scores)
+ if idx.stamps and (idx.scores or not scores) then return end
+ local data=LegionKeyHistoryLeaderboard;local s=data.historyText
+ local stamps,values={},scores and {} or nil
+ for n=1,idx.count do
+  if values then
+   local level,ms,stamp=s:match('^%d+|(%d+)|(%d+)|(%d+)|',idx.starts[n])
+   stamps[n]=tonumber(stamp);values[n]=runScore(tonumber(level),tonumber(ms)/1000,(data.historyMaps[idx.slots[n]] or {}).timer)
+  else stamps[n]=tonumber(s:match('^%d+|%d+|%d+|(%d+)|',idx.starts[n])) end
+ end
+ idx.stamps=stamps;if values then idx.scores=values end
+end
+-- The history line of run number n.
+function H:RunLine(n)
+ local data=LegionKeyHistoryLeaderboard;local idx=self:RunIndex();local start=idx and idx.starts[n]
+ if not start then return nil end
+ local s=data.historyText;return s:sub(start,(s:find('\n',start,true) or #s+1)-1)
+end
+-- Run numbers ranked by run score (best first; the earlier run wins a tie), for all dungeons
+-- (slot nil) or one; list.rank[n] is run n's place. Kept once per file.
 function H:RunRanking(slot)
- local data=LegionKeyHistoryLeaderboard;if not data or not data.historyText then return {} end
+ local data=LegionKeyHistoryLeaderboard;local idx=self:RunIndex();if not idx then return {rank={}} end
  local cache=data.runRanking;if not cache then cache={};data.runRanking=cache end
  local key=slot or 0;if cache[key] then return cache[key] end
- local list={}
- for line in data.historyText:gmatch('[^\n]+') do
-  local map,level,ms,stamp=historyFields(line)
-  if map and (not slot or tonumber(map)==slot) then
-   local info=data.historyMaps[tonumber(map)] or {}
-   list[#list+1]={line=line,score=runScore(tonumber(level),tonumber(ms)/1000,info.timer),stamp=tonumber(stamp)}
-  end
+ local list,slots={},idx.slots
+ for n=1,idx.count do if not slot or slots[n]==slot then list[#list+1]=n end end
+ if data.historyOrder~='score' then
+  indexTimes(idx,true)
+  local scores,stamps=idx.scores,idx.stamps
+  table.sort(list,function(a,b)
+   if scores[a]~=scores[b] then return scores[a]>scores[b] end
+   if stamps[a]~=stamps[b] then return stamps[a]<stamps[b] end
+   return a<b
+  end)
  end
- table.sort(list,function(a,b) if a.score~=b.score then return a.score>b.score end;return a.stamp<b.stamp end)
- for i,e in ipairs(list) do e.rank=i end
+ -- Every run in a sorted file: run n is rank n, no table needed.
+ local rank
+ if not slot and data.historyOrder=='score' then rank=setmetatable({},{__index=function(_,n) return n end})
+ else rank={};for i,n in ipairs(list) do rank[n]=i end end
+ list.rank=rank
  cache[key]=list
- if not slot then data.runRankByLine={};for _,e in ipairs(list) do data.runRankByLine[e.line]=e.rank end end
  return list
+end
+-- Once the leaderboard and player-runs windows are both closed, the run lists go (6-7 MB); they
+-- are built again the next time one opens.
+function H:DropRunCaches()
+ local data=LegionKeyHistoryLeaderboard
+ if not data or (self.leaderboardFrame and self.leaderboardFrame:IsShown()) or (self.playerRunsFrame and self.playerRunsFrame:IsShown()) then return end
+ data.runIndex,data.runRanking=nil,nil
 end
 -- The same runs newest first; each keeps its score rank.
 function H:LatestRuns(slot)
  local data=LegionKeyHistoryLeaderboard or {};local key='latest'..(slot or 0)
  local cache=data.runRanking or {};if cache[key] then return cache[key] end
- local list={};for i,e in ipairs(self:RunRanking(slot)) do list[i]=e end
- table.sort(list,function(a,b) if a.stamp~=b.stamp then return a.stamp>b.stamp end;return a.rank<b.rank end)
+ local ranked=self:RunRanking(slot);local idx=self:RunIndex()
+ local list={rank=ranked.rank};for i,n in ipairs(ranked) do list[i]=n end
+ if not idx then return list end
+ indexTimes(idx)
+ local stamps,rank=idx.stamps,ranked.rank
+ table.sort(list,function(a,b) if stamps[a]~=stamps[b] then return stamps[a]>stamps[b] end;return rank[a]<rank[b] end)
  data.runRanking[key]=list;return list
 end
--- Every run in the leaderboard file that a character (leaderboard row) played.
+-- Every run in the leaderboard file that a character (leaderboard row) played; run.n is its run number.
 function H:PlayerRuns(row)
  local data=LegionKeyHistoryLeaderboard
  if not row or not data or not data.historyText then return {} end
- local needle=','..row..':';local runs={}
- for line in data.historyText:gmatch('[^\n]+') do
-  local map,_,_,_,_,party=historyFields(line)
-  if map and (','..party):find(needle,1,true) then runs[#runs+1]=historyRun(data,line) end
- end
+ local runs,s={},data.historyText
+ local idx=self:RunIndex();local starts=idx.starts
+ eachRowLine(s,row,function(start)
+  local run=historyRun(data,s:sub(start,(s:find('\n',start,true) or #s+1)-1))
+  if run then
+   local lo,hi=1,idx.count
+   while lo<=hi do local mid=math.floor((lo+hi)/2);local v=starts[mid];if v==start then run.n=mid;break elseif v<start then lo=mid+1 else hi=mid-1 end end
+   runs[#runs+1]=run
+  end
+ end)
  return runs
 end
 -- "12 min ago", "5 h ago", "3 d ago".
@@ -1481,8 +1580,7 @@ function H:RefreshPlayerRuns()
   if f.order=='best' then if a.score~=b.score then return a.score>b.score end end
   return a.stamp>b.stamp
  end)
- self:RunRanking()
- local ranks=data.runRankByLine or {}
+ local ranks=self:RunRanking().rank
  local c=RAID_CLASS_COLORS and RAID_CLASS_COLORS[classes[p.class]]
  f.title:SetText((c and string.format('|cff%02x%02x%02x',c.r*255,c.g*255,c.b*255) or '')..p.name..'|r  '..p.realm)
  f.status:SetText(self:ColoredScore(p.score)..string.format(' points  |  Rank %s  |  %d runs in the leaderboard file',tostring(self:PlayerRank(p) or '?'),#runs))
@@ -1491,7 +1589,7 @@ function H:RefreshPlayerRuns()
  f.pages:SetText(f.page..' / '..pages);f.prev:SetEnabled(f.page>1);f.next:SetEnabled(f.page<pages)
  f.empty:SetShown(#runs==0)
  for i,line in ipairs(f.rows) do
-  local run=runs[(f.page-1)*PAGE+i];self:FillRunLine(line,run,run and ranks[run.line])
+  local run=runs[(f.page-1)*PAGE+i];self:FillRunLine(line,run,run and run.n and ranks[run.n])
  end
 end
 function H:CreatePlayerRuns()
@@ -1500,6 +1598,7 @@ function H:CreatePlayerRuns()
  f:SetFrameStrata('DIALOG');f:SetBackdrop(backdrop);f:SetBackdropColor(.025,.035,.05,1);f:SetBackdropBorderColor(.17,.30,.34);f:EnableMouse(true)
  f:SetMovable(true);f:RegisterForDrag('LeftButton');f:SetScript('OnDragStart',f.StartMoving);f:SetScript('OnDragStop',f.StopMovingOrSizing)
  table.insert(UISpecialFrames,'LegionKeyHistoryPlayerRuns')
+ f:HookScript('OnHide',function() H:DropRunCaches() end)
  f.title=text(f,23,22,-18,650,'')
  f.status=text(f,11,24,-51,980)
  f.order='latest'
@@ -1531,7 +1630,7 @@ function H:RefreshRunBoard(f)
  f.footer:SetText('Every run in the leaderboard file by run score (unofficial). Latest: newest first, each keeping its rank. Hover a run for the group.')
  f.empty:SetText('No runs in the leaderboard file. Run LKH Updater.cmd, then /reload.');f.empty:SetShown(#list==0)
  for i,line in ipairs(f.runLines) do
-  local e=list[(f.page-1)*PAGE+i];self:FillRunLine(line,e and historyRun(data,e.line),e and e.rank)
+  local n=list[(f.page-1)*PAGE+i];self:FillRunLine(line,n and historyRun(data,self:RunLine(n)),n and list.rank[n])
  end
 end
 
