@@ -17,7 +17,7 @@ H.defaultSettings={
  -- Party keys: the window in dungeons with each group member's keystone (partyKeysPoint: where)
  partyKeys=true,partyKeysLocked=false,
  -- Score tooltip
- tipRanks=true,tipBestRun=true,tipTimedRuns=true,tipDungeons=true,tipWeekSplit=true,
+ tipRanks=true,tipBestRun=true,tipTimedRuns=true,tipDungeons=true,tipDungeonTime=true,tipDungeonScore=true,tipWeekSplit=true,
  -- Journal (not on the settings page)
  showLaterDungeons=false,dayChart='bar',
  -- Font of the addon's windows: 'auto' (Expressway when installed, else Arial Narrow) or a font name
@@ -459,7 +459,7 @@ function H:CreateSettingsPreview(body,refreshers)
    local p=players[i];local d,level=bestDungeon(p)
    local title=i==1 and (d.short..' +'..level) or ('M'..level..' '..d.short..' LF TANK')
    groups[i]={p=p,d=d,title=title}
-   if H.FormatSearchRow then H:FormatSearchRow(row.name,row.activity,title,d.name..' (Mythic Keystone)',d.short,p.name,176,false) end
+   if H.FormatSearchRow then H:FormatSearchRow(row.name,row.activity,title,d.name..' (Mythic Keystone)',d.short,p.name,176,false,nil,type(p.class)=='number' and CLASS_TOKENS[p.class] or p.class) end
   end
   box:SetHeight(102)
   local g=groups[1];local t=startTip()
@@ -818,7 +818,10 @@ function H:CreateSettingsPanel()
  check('Ranks: overall, spec and class','tipRanks','tooltip')
  check('Best run','tipBestRun','tooltip')
  check('Timed runs by level (+10, +15, +20)','tipTimedRuns','tooltip')
- check('Best key in each dungeon','tipDungeons','tooltip')
+ -- With the Fortified / Tyrannical split off: the best key always, its time and score as picked.
+ box('Best key in each dungeon','tipDungeons','tooltip')
+ local timeBox,scoreBox=box('Timer','tipDungeonTime','tooltip',330),box('IO','tipDungeonScore','tooltip',420);y=y-26
+ refreshers[#refreshers+1]=function() timeBox:SetShown(not H.settings.tipWeekSplit);scoreBox:SetShown(not H.settings.tipWeekSplit) end
  check('Best key split by Fortified / Tyrannical','tipWeekSplit','tooltip')
 
  -- Friends in keys ---------------------------------------------------------------------------

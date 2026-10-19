@@ -321,14 +321,17 @@ end
 --               over "Leader 1008"
 --   plain       the group title over the dungeon name
 -- faded: delisted or finished rows, kept in Blizzard's grey. score: fixed score for previews.
-function H:FormatSearchRow(nameText,activityText,title,activityName,short,leader,width,faded,score)
+-- class: the leader's class token (e.g. 'PALADIN'); the name is shown in its colour.
+function H:FormatSearchRow(nameText,activityText,title,activityName,short,leader,width,faded,score,class)
  title=tostring(title or '');local dungeon=self:CleanActivityName(activityName)
  local style=self.settings.searchStyle
  local leaderText
  if leader and style~='plain' then
   if not score then local p=self:PlayerScore(leader);score=p and p.score end
   local _,_,_,hex=self:ScoreColor(score)
-  leaderText=faded and (leader..' '..self:FormatScore(score)) or ('|cffffffff'..leader..'|r '..hex..self:FormatScore(score)..'|r')
+  local c=class and RAID_CLASS_COLORS and RAID_CLASS_COLORS[class]
+  local nameHex=c and string.format('|cff%02x%02x%02x',c.r*255,c.g*255,c.b*255) or '|cffffffff'
+  leaderText=faded and (leader..' '..self:FormatScore(score)) or (nameHex..leader..'|r '..hex..self:FormatScore(score)..'|r')
  end
  local sep=faded and ' - ' or '|cff666666 - |r'
  -- One line only: a wrapped top line would run into the dungeon line below it.
@@ -377,17 +380,29 @@ local function starKey(level,upgrades,late)
 end
 -- The same key text for other windows (the group window).
 function H:GoldKey(level,upgrades,late) return starKey(level,upgrades,late) end
+-- A dungeon row's columns: the key, then its time and score when the settings show them.
+function H:DungeonRowParts(j,b)
+ local late=self:OverTime(j,b)
+ local time,score=self.settings.tipDungeonTime~=false,self.settings.tipDungeonScore~=false
+ local parts={starKey(b[2],self:KeyUpgrades(b[3],self:DungeonTimer(j)),late)}
+ if time then parts[#parts+1]=grey(self:Clock(b[3]),late) end
+ if time and score then parts[#parts+1]=late and '|cff7a7a7a|||r' or '|' end
+ if score then parts[#parts+1]=grey(string.format('%.1f IO',b[1]),late) end
+ return parts
+end
 function H:PrepareScoreTooltip(p)
- if not p or p.tooltipRows then return end
- self.tooltipCacheQueue=self.tooltipCacheQueue or {}
- local queue=self.tooltipCacheQueue
- queue[#queue+1]=p
- if #queue>128 then local old=table.remove(queue,1);old.tooltipRows=nil end
- p.tooltipRows={}
+ local mode=(self.settings.tipDungeonTime~=false and 't' or '')..(self.settings.tipDungeonScore~=false and 's' or '')
+ if not p or (p.tooltipRows and p.tooltipRowsMode==mode) then return end
+ if not p.tooltipRows then
+  self.tooltipCacheQueue=self.tooltipCacheQueue or {}
+  local queue=self.tooltipCacheQueue
+  queue[#queue+1]=p
+  if #queue>128 then local old=table.remove(queue,1);old.tooltipRows=nil end
+ end
+ p.tooltipRows={};p.tooltipRowsMode=mode
  for j,d in ipairs((LegionKeyHistoryLeaderboard or {}).dungeons or {}) do
   local b=p.best[d.id]
-  local late=self:OverTime(j,b)
-  p.tooltipRows[d.id]=b and (starKey(b[2],self:KeyUpgrades(b[3],self:DungeonTimer(j)),late)..grey(string.format('  %s  |  %.1f IO',self:Clock(b[3]),b[1]),late)) or '-'
+  p.tooltipRows[d.id]=b and table.concat(self:DungeonRowParts(j,b),'  ') or '-'
  end
 end
 -- Tooltip rows whose right side is split into columns (key, time, score) that line up from row
@@ -536,8 +551,9 @@ function H:AddScoreTooltip(tooltip,name,realm,selected)
   tooltip:AddLine(' ');tooltip:AddLine('Best Runs by Dungeon',.29,.86,.78)
   for j,d in ipairs(dungeons) do
    local b=p.best[d.id];local late=self:OverTime(j,b);local l=late and .48 or .8
+   self:PrepareScoreTooltip(p)
    tooltip:AddDoubleLine(dungeonName(d),p.tooltipRows[d.id],l,late and .48 or .85,late and .48 or .9,1,1,1)
-   if b then aligned[#aligned+1]={line=tooltip:NumLines(),parts={starKey(b[2],self:KeyUpgrades(b[3],self:DungeonTimer(j)),late),grey(self:Clock(b[3]),late),late and '|cff7a7a7a|||r' or '|',grey(string.format('%.1f IO',b[1]),late)}} end
+   if b then aligned[#aligned+1]={line=tooltip:NumLines(),parts=self:DungeonRowParts(j,b)} end
   end
  end
  if p.localUpdated then tooltip:AddLine('Includes locally recorded party runs.',.29,.86,.78) end
@@ -661,7 +677,10 @@ function H:InstallScoreHooks()
   local dungeonID=H:TooltipDungeon(info[2]);local dungeon
   for _,d in ipairs((LegionKeyHistoryLeaderboard or {}).dungeons or {}) do if d.id==dungeonID then dungeon=d end end
   -- Blizzard sets the dungeon line to the room the row has for text (less beside voice chat).
-  H:FormatSearchRow(row.Name,row.ActivityName,info[3],activityName,dungeon and dungeon.short,info[13],row.ActivityName:GetWidth() or 176,info[12])
+  -- Leader's class: from the leaderboard, else the first group member (the leader).
+  local p=info[13] and H:PlayerScore(info[13]);local class=p and classes[p.class]
+  if not class and C_LFGList.GetSearchResultMemberInfo then class=select(2,C_LFGList.GetSearchResultMemberInfo(row.resultID,1)) end
+  H:FormatSearchRow(row.Name,row.ActivityName,info[3],activityName,dungeon and dungeon.short,info[13],row.ActivityName:GetWidth() or 176,info[12],nil,class)
  end)
  hook('LFGListUtil_SetSearchEntryTooltip',function(tooltip,id)
   if not H.settings.hoverSearch then return end
