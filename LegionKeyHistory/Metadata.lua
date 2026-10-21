@@ -211,6 +211,18 @@ end
 function H:RunKeyText(run)
  return self:KeyStars(run.level,self:UpgradeCount(run),run.timed==false)
 end
+-- Names in one cell, each kept whole: the ones that don't fit become a grey "+N" (hovering
+-- the run lists everyone).
+function H:FitNames(cell,names)
+ local width=cell:GetWidth() or 0;cell:SetText(table.concat(names,'  '))
+ if width<=0 then return end
+ cell:SetWidth(0)
+ local shown=#names
+ while shown>1 and (cell:GetStringWidth() or 0)>width do
+  shown=shown-1;cell:SetText(table.concat(names,'  ',1,shown)..'  |cff888888+'..(#names-shown)..'|r')
+ end
+ cell:SetWidth(width)
+end
 -- Member role from recorded runs ('TANK', 'HEALER', 'DAMAGER'/'NONE'/nil) as tank/healer/dps.
 function H:MemberRole(member)
  local role=member and member.role

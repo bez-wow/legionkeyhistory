@@ -155,6 +155,7 @@ function H:Refresh()
    row.icon:SetShown(not self.filterDungeon);row.cols[1]:SetShown(not self.filterDungeon)
    row:SetBackdropBorderColor(self.selected==run and .29 or .10,self.selected==run and .86 or .15,self.selected==run and .78 or .20)
    for j,v in ipairs(values) do row.cols[j]:SetText(v) end
+   self:FitNames(row.cols[5],roles.tank);self:FitNames(row.cols[6],roles.healer);self:FitNames(row.cols[7],roles.dps)
    row:Show()
   else row:Hide() end
  end

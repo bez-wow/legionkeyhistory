@@ -1543,7 +1543,8 @@ function H:CreateRunLines(f,headerY,firstY)
  end
  return headers,lines
 end
-function H:FillRunLine(line,run,rank)
+-- focusRow: on a player's page, that player comes first among their role's names.
+function H:FillRunLine(line,run,rank,focusRow)
  local data=LegionKeyHistoryLeaderboard;line.run=run;line:SetShown(run~=nil)
  if not run then return end
  line.cells[1]:SetText(rank and tostring(rank) or '-')
@@ -1560,16 +1561,16 @@ function H:FillRunLine(line,run,rank)
  for _,m in ipairs(run.members) do
   local role=m.spec and m.spec.role or 'dps'
   local list=role=='tank' and tank or role=='healer' and healer or dps
-  list[#list+1]=memberText(data,m)
+  if m.row==focusRow then table.insert(list,1,memberText(data,m)) else list[#list+1]=memberText(data,m) end
  end
- line.cells[6]:SetText(table.concat(tank,'  '));line.cells[7]:SetText(table.concat(healer,'  '));line.cells[8]:SetText(table.concat(dps,'  '))
+ self:FitNames(line.cells[6],tank);self:FitNames(line.cells[7],healer);self:FitNames(line.cells[8],dps)
  line.cells[9]:SetText(self:ColoredScore(run.score,true));line.cells[10]:SetText(self:Ago(run.stamp))
 end
 function H:OpenPlayerRuns(row)
  local data=LegionKeyHistoryLeaderboard;if not data or not data.names or not data.names[row] then return end
  if not self.playerRunsFrame then self:CreatePlayerRuns() end
  local f=self.playerRunsFrame
- f.player=self:LeaderboardEntry(row);f.runs=self:PlayerRuns(row);f.page=1
+ f.player=self:LeaderboardEntry(row);f.playerRow=row;f.runs=self:PlayerRuns(row);f.page=1
  f:Show();self:RefreshPlayerRuns();self:Front(f)
 end
 function H:RefreshPlayerRuns()
@@ -1589,7 +1590,7 @@ function H:RefreshPlayerRuns()
  f.pages:SetText(f.page..' / '..pages);f.prev:SetEnabled(f.page>1);f.next:SetEnabled(f.page<pages)
  f.empty:SetShown(#runs==0)
  for i,line in ipairs(f.rows) do
-  local run=runs[(f.page-1)*PAGE+i];self:FillRunLine(line,run,run and run.n and ranks[run.n])
+  local run=runs[(f.page-1)*PAGE+i];self:FillRunLine(line,run,run and run.n and ranks[run.n],f.playerRow)
  end
 end
 function H:CreatePlayerRuns()
