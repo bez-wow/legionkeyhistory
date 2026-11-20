@@ -314,8 +314,48 @@ function H:LocalScores()
  return self.localScoreCache
 end
 
+-- Keys of +17 and higher finished before Tauri's fixes of 9 November 2026 (13:35 UTC) that used the
+-- bugs those fixes closed count for nothing, like on Tauri Achievements (MythicPlusInvalidRuns.cs).
+-- Runs record class tokens and roles, not specs: a Monk tank is a Brewmaster.
+local INVALID_FROM_LEVEL,FIXES_WENT_LIVE=17,1794231300
+local function anyMember(run,test)
+ for _,m in ipairs(run.members or {}) do if test(m) then return true end end
+ return false
+end
+local function isClass(class) return function(m) return m.class==class end end
+local function isBrewmaster(m) return m.class=='MONK' and m.role=='TANK' end
+-- The leaderboard file's invalid runs ("mapID|level|ms|stamp|Name-Realm,...|reason" per line), by
+-- "mapID:level", read once per file. They catch journal runs without classes (combat log imports).
+local function invalidFileRuns()
+ local data=LegionKeyHistoryLeaderboard
+ if not data or not data.invalidText then return nil end
+ if data.invalidRuns then return data.invalidRuns end
+ local byKey={}
+ for map,level,ms,stamp,names,reason in data.invalidText:gmatch('(%d+)|(%d+)|(%d+)|(%d+)|([^|\n]*)|([^\n]*)') do
+  local entry={id='invalid:'..map..':'..level..':'..stamp,mapID=tonumber(map),level=tonumber(level),duration=tonumber(ms)/1000,endedAt=tonumber(stamp),members={},reason=reason}
+  for name in names:gmatch('[^,]+') do entry.members[#entry.members+1]={name=name} end
+  local key=map..':'..level;byKey[key]=byKey[key] or {};table.insert(byKey[key],entry)
+ end
+ data.invalidRuns=byKey
+ return byKey
+end
+function H:InvalidRunReason(run)
+ if not run or (run.level or 0)<INVALID_FROM_LEVEL or (run.endedAt or 0)>=FIXES_WENT_LIVE then return nil end
+ local id=dungeonIDs[run.mapID]
+ local reason
+ if id=='brh' and anyMember(run,isClass('DEATHKNIGHT')) then reason='Black Rook Hold +17 or higher with a Death Knight'
+ elseif (id=='votw' or id=='cos' or id=='dht') and anyMember(run,isClass('WARLOCK')) then reason='Vault of the Wardens, Court of Stars or Darkheart Thicket +17 or higher with a Warlock'
+ elseif anyMember(run,isBrewmaster) then reason='+17 or higher with a Brewmaster Monk'
+ elseif id=='cos' then reason='Court of Stars +17 or higher' end
+ if reason then return reason..', before the 9 November fixes' end
+ local listed=invalidFileRuns()
+ for _,entry in ipairs(listed and listed[run.mapID..':'..run.level] or {}) do
+  if self:SameSnapshotRun(run,entry) then return entry.reason end
+ end
+ return nil
+end
 function H:RunScore(run)
- if not run or not dungeonIDs[run.mapID] or run.status~='completed' then return nil end
+ if not run or not dungeonIDs[run.mapID] or run.status~='completed' or self:InvalidRunReason(run) then return nil end
  self:ResolveTimer(run)
  local limit=run.timeLimit;local duration=run.duration;local level=run.level
  if not limit or limit<=0 or not duration or duration<=0 or not level then return nil end

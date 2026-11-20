@@ -370,6 +370,8 @@ function H:CreateUI()
      GameTooltip:AddLine(H:Clock(self.run.duration)..'  |  '..(self.run.date or ''),.8,.85,.9)
      if H.RunScore then
       local score=H:RunScore(self.run)
+      local invalid=H.InvalidRunReason and H:InvalidRunReason(self.run)
+      if invalid then GameTooltip:AddLine('Invalid run: '..invalid..'. It adds no IO.',1,.45,.45,true) end
       if score then
        GameTooltip:AddLine(string.format('Run score: %.1f IO (unofficial)',score),.29,.86,.78)
        local _,bests=H:PersonalScore()
